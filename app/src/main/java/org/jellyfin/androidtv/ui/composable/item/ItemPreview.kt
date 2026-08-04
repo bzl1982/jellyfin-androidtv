@@ -50,7 +50,7 @@ private fun ItemPreviewMetadata(
 		title?.let { content ->
 			ProvideTextStyle(
 				value = JellyfinTheme.typography.default.copy(
-					color = Tokens.Color.colorGrey100,
+					color = JellyfinTheme.colorScheme.listHeader,
 					fontSize = 12.sp,
 				),
 				content = content,
@@ -60,7 +60,7 @@ private fun ItemPreviewMetadata(
 		subtitle?.let { content ->
 			ProvideTextStyle(
 				value = JellyfinTheme.typography.default.copy(
-					color = Tokens.Color.colorGrey300,
+					color = JellyfinTheme.colorScheme.listCaption,
 					fontSize = 10.sp,
 				),
 				content = content,
