@@ -7,7 +7,7 @@ on:
       - master
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -43,3 +43,9 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
           if-no-files-found: error
+
+      - name: Upload APK to GitHub release v1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v1.1 app/build/outputs/apk/debug/*.apk --clobber --repo bzl1982/jellyfin-androidtv
