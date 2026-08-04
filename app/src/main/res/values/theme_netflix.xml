@@ -1,11 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- 网飞黑红主题 Netflix Red -->
+    <!-- ============================================================ -->
+    <!-- 网飞黑红主题 Netflix Red  v1.1 (2026-08-04) -->
+    <!-- 升级要点: 加 4 个 token (匹配绿/Hero 遮罩/HDR 标签/品牌锚点) -->
+    <!-- 参考: KODI Titan Bingie Mod "NETFLIX SINK" 设计语言 -->
+    <!-- ============================================================ -->
+
     <color name="theme_netflix_light">#E50914</color>
     <color name="theme_netflix_dark">#141414</color>
     <color name="theme_netflix_black">#000000</color>
     <color name="theme_netflix_grey">#2F2F2F</color>
+
+    <!-- v1.1 新增 token -->
+    <color name="theme_netflix_match_green">#46D369</color>  <!-- 网飞标志 "70% 匹配" 绿 -->
+    <color name="theme_netflix_hero_overlay">#99000000</color>  <!-- Hero 区域左侧文字背景 (60% 黑) -->
+    <color name="theme_netflix_hdr_label_bg">#33FFFFFF</color>  <!-- 4K / HDR 标签背景 (20% 白) -->
+    <color name="theme_netflix_brand_anchor">#E50914</color>  <!-- 右下角 NETFLIX logo 主色 -->
 
     <style name="Theme.Jellyfin.Netflix" parent="Theme.Jellyfin">
         <item name="android:colorPrimary">@color/theme_netflix_dark</item>
@@ -16,6 +27,12 @@
         <item name="progressPrimary">@color/theme_netflix_light</item>
         <item name="progressSecondary">@color/theme_netflix_dark</item>
         <item name="popupMenuBackground">@color/theme_netflix_black</item>
+
+        <!-- v1.1 新增 token 注入 (供未来 Compose 布局使用) -->
+        <item name="matchGreen">@color/theme_netflix_match_green</item>
+        <item name="heroOverlay">@color/theme_netflix_hero_overlay</item>
+        <item name="hdrLabelBg">@color/theme_netflix_hdr_label_bg</item>
+        <item name="brandAnchor">@color/theme_netflix_brand_anchor</item>
 
         <!-- Control icons -->
         <item name="controlIconBackground">@color/theme_netflix_black</item>
