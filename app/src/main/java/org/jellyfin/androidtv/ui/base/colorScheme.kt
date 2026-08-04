@@ -73,20 +73,24 @@ fun dynamicColorScheme(): ColorScheme {
 
 		typedArray.recycle()
 
+		// NOTE: use Color(Int) for ARGB values. Color(ULong) expects Compose's packed
+		// internal representation -- feeding it an ARGB int yields a transparent/black
+		// color, which silently breaks every themed color.
 		val defaultBackground = when (defaultBackgroundDrawable) {
-			is ColorDrawable -> Color(defaultBackgroundDrawable.color.toULong())
+			is ColorDrawable -> Color(defaultBackgroundDrawable.color)
 			else -> Tokens.Color.colorGrey975
 		}
 
 		val base = colorScheme()
 		base.copy(
 			background = defaultBackground,
-			surface = if (cardViewBackground == 0) base.surface else Color(cardViewBackground.toULong()),
-			buttonFocused = Color(buttonHighlight.toULong()),
-			rangeControlFill = Color(colorAccent.toULong()),
-			badge = Color(colorAccent.toULong()),
-			listButtonFocused = Color(colorPrimary.toULong()),
-			listHeader = Color(headerText.toULong()),
+			surface = if (cardViewBackground == 0) base.surface else Color(cardViewBackground),
+			buttonFocused = Color(buttonHighlight),
+			onButtonFocused = Color.White,
+			rangeControlFill = Color(colorAccent),
+			badge = Color(colorAccent),
+			listButtonFocused = Color(colorPrimary),
+			listHeader = Color(headerText),
 		)
 	}
 }
