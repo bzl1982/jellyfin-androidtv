@@ -453,11 +453,11 @@ private fun ArcticHeroStage(
 			}
 
 			Row(
-				horizontalArrangement = Arrangement.spacedBy(16.dp),
+				horizontalArrangement = Arrangement.spacedBy(12.dp),
 				verticalAlignment = Alignment.CenterVertically,
 			) {
-				HeroPlayButton(size = 96.dp, iconSize = 38.dp, onClick = onPlay)
-				HeroInfoButton(size = 54.dp, iconSize = 22.dp, onClick = onInfo)
+				HeroPlayButton(size = 52.dp, iconSize = 20.dp, onClick = onPlay)
+				HeroInfoButton(size = 42.dp, iconSize = 17.dp, onClick = onInfo)
 			}
 		}
 
@@ -520,6 +520,7 @@ private fun HeroPlayButton(
 	Box(
 		modifier = Modifier
 			.size(size)
+			.scale(if (focused) 1.10f else 1f)
 			.background(
 				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.55f),
 				CircleShape,
@@ -553,6 +554,7 @@ private fun HeroInfoButton(
 	Box(
 		modifier = Modifier
 			.size(size)
+			.scale(if (focused) 1.10f else 1f)
 			.background(
 				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.55f),
 				CircleShape,
