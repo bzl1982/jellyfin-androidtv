@@ -20,13 +20,21 @@
 
     <style name="Theme.Jellyfin.Netflix" parent="Theme.Jellyfin">
         <item name="android:colorPrimary">@color/theme_netflix_dark</item>
+        <item name="colorPrimary">@color/theme_netflix_dark</item>
         <item name="android:colorPrimaryDark">@color/theme_netflix_black</item>
+        <item name="colorPrimaryDark">@color/theme_netflix_black</item>
         <item name="android:colorAccent">@color/theme_netflix_light</item>
-        <item name="defaultBackground">@drawable/moviebg</item>
+        <item name="colorAccent">@color/theme_netflix_light</item>
+        <item name="android:windowBackground">@color/theme_netflix_black</item>
+        <item name="defaultBackground">@color/theme_netflix_black</item>
+        <item name="cardViewBackground">@color/theme_netflix_grey</item>
         <item name="defaultSearchColor">@color/theme_netflix_light</item>
         <item name="progressPrimary">@color/theme_netflix_light</item>
         <item name="progressSecondary">@color/theme_netflix_dark</item>
         <item name="popupMenuBackground">@color/theme_netflix_black</item>
+        <item name="buttonDefaultNormalBackground">@color/theme_netflix_black</item>
+        <item name="buttonDefaultHighlightBackground">@color/theme_netflix_light</item>
+        <item name="headerTextColor">@color/white</item>
 
         <!-- v1.1 新增 token 注入 (供未来 Compose 布局使用) -->
         <item name="matchGreen">@color/theme_netflix_match_green</item>
