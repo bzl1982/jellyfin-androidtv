@@ -18,11 +18,14 @@ fun ItemCard(
 	image: @Composable BoxScope.() -> Unit,
 	overlay: (@Composable BoxScope.() -> Unit)? = null,
 	shape: Shape = JellyfinTheme.shapes.medium,
+	focused: Boolean = false,
 ) {
+	val backgroundColor = if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface
+
 	Box(
 		modifier = modifier
 			.clip(shape)
-			.background(JellyfinTheme.colorScheme.surface, shape)
+			.background(backgroundColor, shape)
 	) {
 		image()
 
