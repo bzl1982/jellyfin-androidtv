@@ -1,27 +1,29 @@
 package org.jellyfin.androidtv.ui.home
 
 import android.widget.ImageView
+import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -43,10 +45,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.data.repository.ItemRepository
+import org.jellyfin.androidtv.data.repository.UserViewsRepository
+import org.jellyfin.androidtv.ui.base.CircularProgressIndicator
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
@@ -64,12 +69,11 @@ import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
 import org.jellyfin.sdk.api.client.extensions.userLibraryApi
 import org.jellyfin.sdk.model.api.BaseItemDto
-import org.jellyfin.sdk.model.api.CollectionType
-import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.CollectionType
 import org.jellyfin.sdk.model.api.ItemSortBy
+import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.SortOrder
-import org.jellyfin.androidtv.data.repository.UserViewsRepository
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinActivityViewModel
 
@@ -96,7 +100,8 @@ fun ArcticHomeScreen() {
 	val settingsViewModel = koinActivityViewModel<SettingsViewModel>()
 
 	var libraries by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
-	var hero by remember { mutableStateOf<BaseItemDto?>(null) }
+	var featuredItems by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
+	var heroIndex by remember { mutableStateOf(0) }
 	var rows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
 	var loaded by remember { mutableStateOf(false) }
 
@@ -104,67 +109,77 @@ fun ArcticHomeScreen() {
 
 	LaunchedEffect(Unit) {
 		withContext(Dispatchers.IO) {
-			runCatching {
-				val views = userViewsRepository.views.first()
-					.filter { it.collectionType !in setOf(CollectionType.PLAYLISTS, CollectionType.LIVETV) }
+		runCatching {
+			val views = userViewsRepository.views.first()
+				.filter { it.collectionType !in setOf(CollectionType.PLAYLISTS, CollectionType.LIVETV) }
 
-				val resume = api.itemsApi.getResumeItems(
-					fields = ItemRepository.browseFields,
-					imageTypeLimit = 1,
+			val resume = api.itemsApi.getResumeItems(
+				fields = ItemRepository.browseFields,
+				imageTypeLimit = 1,
+				limit = 20,
+				mediaTypes = listOf(MediaType.VIDEO),
+				includeItemTypes = listOf(BaseItemKind.MOVIE, BaseItemKind.EPISODE),
+				excludeActiveSessions = true,
+			).content.items.orEmpty()
+
+			val nextUp = api.tvShowsApi.getNextUp(
+				imageTypeLimit = 1,
+				limit = 20,
+				enableResumable = false,
+				fields = ItemRepository.browseFields,
+			).content.items.orEmpty()
+
+			val recentlyAdded = api.itemsApi.getItems(
+				limit = 24,
+				recursive = true,
+				includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+				sortBy = setOf(ItemSortBy.DATE_CREATED),
+				sortOrder = setOf(SortOrder.DESCENDING),
+				fields = ItemRepository.browseFields,
+				imageTypeLimit = 1,
+			).content.items.orEmpty()
+
+			val perLibrary = views.take(6).mapNotNull { view ->
+				val items = api.userLibraryApi.getLatestMedia(
+					parentId = view.id,
 					limit = 20,
-					mediaTypes = listOf(MediaType.VIDEO),
-					includeItemTypes = listOf(BaseItemKind.MOVIE, BaseItemKind.EPISODE),
-					excludeActiveSessions = true,
-				).content.items.orEmpty()
-
-				val nextUp = api.tvShowsApi.getNextUp(
-					imageTypeLimit = 1,
-					limit = 20,
-					enableResumable = false,
-					fields = ItemRepository.browseFields,
-				).content.items.orEmpty()
-
-				val recentlyAdded = api.itemsApi.getItems(
-					limit = 24,
-					recursive = true,
-					includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
-					sortBy = setOf(ItemSortBy.DATE_CREATED),
-					sortOrder = setOf(SortOrder.DESCENDING),
 					fields = ItemRepository.browseFields,
 					imageTypeLimit = 1,
-				).content.items.orEmpty()
+					groupItems = true,
+				).content
+				if (items.isNullOrEmpty()) null else ArcticRow(view.name ?: "", items)
+			}
 
-				val perLibrary = views.take(6).mapNotNull { view ->
-					val items = api.userLibraryApi.getLatestMedia(
-						parentId = view.id,
-						limit = 20,
-						fields = ItemRepository.browseFields,
-						imageTypeLimit = 1,
-						groupItems = true,
-					).content
-					if (items.isNullOrEmpty()) null else ArcticRow(view.name ?: "", items)
-				}
+			val featureCandidates = buildList {
+				addAll(resume)
+				addAll(nextUp)
+				addAll(recentlyAdded)
+				perLibrary.forEach { addAll(it.items.take(2)) }
+			}.distinctBy { it.id }.take(12)
 
-				val heroItem = resume.firstOrNull()
-					?: nextUp.firstOrNull()
-					?: recentlyAdded.firstOrNull()
-					?: perLibrary.firstOrNull()?.items?.firstOrNull()
+			val rowList = buildList {
+				if (resume.isNotEmpty()) add(ArcticRow("继续观看", resume))
+				if (nextUp.isNotEmpty()) add(ArcticRow("接下来播放", nextUp))
+				if (recentlyAdded.isNotEmpty()) add(ArcticRow("最近添加", recentlyAdded))
+				addAll(perLibrary)
+			}
 
-				val rowList = buildList {
-					if (resume.isNotEmpty()) add(ArcticRow("继续观看", resume))
-					if (nextUp.isNotEmpty()) add(ArcticRow("接下来播放", nextUp))
-					if (recentlyAdded.isNotEmpty()) add(ArcticRow("最近添加", recentlyAdded))
-					addAll(perLibrary)
-				}
-
-				withContext(Dispatchers.Main) {
-					libraries = views
-					hero = heroItem
-					rows = rowList
-					loaded = true
-				}
-			}.onFailure { it.printStackTrace() }
+			withContext(Dispatchers.Main) {
+				libraries = views
+				featuredItems = featureCandidates
+				rows = rowList
+				loaded = true
+			}
+		}.onFailure { it.printStackTrace() }
 		}
+	}
+
+	// Auto-rotate the featured stage every 8s (FUSE 3: ~3s idle auto-scroll).
+	// Changing heroIndex cancels and restarts this coroutine, resetting the timer.
+	LaunchedEffect(heroIndex, featuredItems.size) {
+		if (featuredItems.size <= 1) return@LaunchedEffect
+		delay(8_000)
+		heroIndex = (heroIndex + 1) % featuredItems.size
 	}
 
 	Row(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
@@ -178,12 +193,15 @@ fun ArcticHomeScreen() {
 		)
 		ArcticMainContent(
 			modifier = Modifier.weight(1f).fillMaxHeight(),
-			hero = hero,
+			hero = featuredItems.getOrNull(heroIndex),
+			featuredCount = featuredItems.size,
+			heroIndex = heroIndex,
+			onHeroIndexChange = { heroIndex = it },
 			rows = rows,
 			loaded = loaded,
 			onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
-			onHeroPlay = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
-			onHeroInfo = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
+			onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
+			onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
 		)
 	}
 }
@@ -213,7 +231,6 @@ private fun ArcticSidebar(
 			.width(232.dp)
 			.fillMaxHeight()
 			.background(JellyfinTheme.colorScheme.surface.copy(alpha = 0.94f))
-			.focusGroup()
 			.padding(top = 28.dp, bottom = 28.dp),
 	) {
 		entries.forEachIndexed { index, entry ->
@@ -243,41 +260,39 @@ private fun SidebarItem(
 	modifier: Modifier = Modifier,
 ) {
 	var focused by remember { mutableStateOf(false) }
+	val selected = focused
 
 	Row(
 		modifier = modifier
 			.fillMaxWidth()
+			.padding(horizontal = 16.dp, vertical = 5.dp)
 			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.22f)
-				else Color.Transparent,
+				if (selected) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.18f) else Color.Transparent,
+				RoundedCornerShape(12.dp),
+			)
+			.border(
+				width = if (selected) 2.dp else 0.dp,
+				color = if (selected) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
+				shape = RoundedCornerShape(12.dp),
 			)
 			// onFocusChanged MUST precede the focusable/clickable modifier it observes
 			.onFocusChanged { focused = it.hasFocus }
 			.clickable(onClick = entry.onClick)
-			.padding(horizontal = 20.dp, vertical = 15.dp),
+			.padding(horizontal = 14.dp, vertical = 12.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(16.dp),
 	) {
-		Box(
-			Modifier
-				.width(4.dp)
-				.height(26.dp)
-				.background(
-					if (focused) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
-					RoundedCornerShape(2.dp),
-				),
-		)
 		Icon(
 			imageVector = ImageVector.vectorResource(entry.icon),
 			contentDescription = null,
-			tint = if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.8f),
-			modifier = Modifier.size(22.dp),
+			tint = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+			modifier = Modifier.size(23.dp),
 		)
 		Text(
 			entry.label,
-			color = if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground,
+			color = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
 			style = JellyfinTheme.typography.default.copy(
-				fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal,
+				fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
 			),
 		)
 	}
@@ -291,69 +306,109 @@ private fun SidebarItem(
 private fun ArcticMainContent(
 	modifier: Modifier = Modifier,
 	hero: BaseItemDto?,
+	featuredCount: Int,
+	heroIndex: Int,
+	onHeroIndexChange: (Int) -> Unit,
 	rows: List<ArcticRow>,
 	loaded: Boolean,
 	onItemClick: (BaseItemDto) -> Unit,
 	onHeroPlay: (BaseItemDto) -> Unit,
 	onHeroInfo: (BaseItemDto) -> Unit,
 ) {
-	Column(
-		modifier = modifier
-			.verticalScroll(rememberScrollState())
-			.focusGroup()
-			.padding(top = 16.dp),
-	) {
-		if (!loaded) {
-			Box(
-				Modifier.fillMaxWidth().height(320.dp),
-				contentAlignment = Alignment.Center,
-			) {
-				Text("加载中…", color = JellyfinTheme.colorScheme.onBackground)
-			}
-		} else {
-			ArcticHero(
+	BoxWithConstraints(modifier = modifier) {
+		val heroHeight = maxHeight * 0.58f
+
+		Column(Modifier.fillMaxSize()) {
+			ArcticHeroStage(
+				modifier = Modifier
+					.fillMaxWidth()
+					.height(heroHeight),
 				item = hero,
+				featuredCount = featuredCount,
+				heroIndex = heroIndex,
 				onPlay = { hero?.let(onHeroPlay) },
 				onInfo = { hero?.let(onHeroInfo) },
 			)
-			Spacer(Modifier.height(8.dp))
-			rows.forEach { ArcticRowView(it.title, it.items, onItemClick) }
-			Spacer(Modifier.height(48.dp))
+
+			val scrollState = rememberScrollState()
+			Column(
+				modifier = Modifier
+					.weight(1f)
+					.verticalScroll(scrollState),
+			) {
+				if (!loaded) {
+					Box(
+						Modifier
+							.fillMaxWidth()
+							.padding(top = 28.dp),
+						contentAlignment = Alignment.Center,
+					) {
+						CircularProgressIndicator(
+							modifier = Modifier.size(40.dp),
+							color = JellyfinTheme.colorScheme.buttonFocused,
+						)
+					}
+				} else {
+					rows.forEach { ArcticRowView(it.title, it.items, onItemClick) }
+					Spacer(Modifier.height(48.dp))
+				}
+			}
 		}
 	}
 }
 
 @Composable
-private fun ArcticHero(
+private fun ArcticHeroStage(
 	item: BaseItemDto?,
+	featuredCount: Int,
+	heroIndex: Int,
 	onPlay: () -> Unit,
 	onInfo: () -> Unit,
+	modifier: Modifier = Modifier,
 ) {
 	val api = koinInject<ApiClient>()
 	val backdrop: JellyfinImage? = item?.itemBackdropImages?.firstOrNull()
 		?: item?.itemImages?.values?.firstOrNull()
 
-	Box(
-		modifier = Modifier
-			.fillMaxWidth()
-			.height(322.dp),
-	) {
-		if (backdrop != null) {
-			AsyncImage(
-				url = backdrop.getUrl(api, maxWidth = 1280),
-				blurHash = backdrop.blurHash,
-				scaleType = ImageView.ScaleType.CENTER_CROP,
-				modifier = Modifier.fillMaxSize(),
-			)
+	Box(modifier = modifier) {
+		// Full-bleed backdrop with crossfade when the featured item changes
+		Crossfade(
+			targetState = backdrop?.getUrl(api, maxWidth = 1280),
+			label = "hero-backdrop",
+		) { url ->
+			if (url != null) {
+				AsyncImage(
+					url = url,
+					blurHash = backdrop?.blurHash,
+					scaleType = ImageView.ScaleType.CENTER_CROP,
+					modifier = Modifier.fillMaxSize(),
+				)
+			} else {
+				Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background))
+			}
 		}
 
-		// Bottom gradient scrim for legibility (FUSE style)
+		// Left-to-right scrim so left-aligned text stays readable
+		Box(
+			Modifier.fillMaxSize().background(
+				Brush.horizontalGradient(
+					colors = listOf(
+						JellyfinTheme.colorScheme.background.copy(alpha = 0.82f),
+						JellyfinTheme.colorScheme.background.copy(alpha = 0.55f),
+						Color.Transparent,
+					),
+				),
+			),
+		)
+
+		// Bottom gradient scrim to blend into the rows below
 		Box(
 			Modifier.fillMaxSize().background(
 				Brush.verticalGradient(
 					colors = listOf(
 						Color.Transparent,
-						JellyfinTheme.colorScheme.background.copy(alpha = 0.55f),
+						Color.Transparent,
+						JellyfinTheme.colorScheme.background.copy(alpha = 0.65f),
 						JellyfinTheme.colorScheme.background,
 					),
 				),
@@ -362,69 +417,165 @@ private fun ArcticHero(
 
 		Column(
 			modifier = Modifier
-				.align(Alignment.BottomStart)
-				.padding(start = 44.dp, bottom = 34.dp, end = 44.dp),
-			verticalArrangement = Arrangement.spacedBy(12.dp),
+				.fillMaxSize()
+				.padding(start = 44.dp, end = 44.dp, top = 30.dp, bottom = 34.dp),
+			verticalArrangement = Arrangement.SpaceBetween,
 		) {
-			Text(
-				item?.name ?: "",
-				color = JellyfinTheme.colorScheme.onBackground,
-				style = JellyfinTheme.typography.default.copy(
-					fontSize = 30.sp,
-					fontWeight = FontWeight.Bold,
-				),
-				maxLines = 2,
-				overflow = TextOverflow.Ellipsis,
-			)
-			item?.overview?.let { overview ->
+			// Header label + page dots
+			Row(
+				modifier = Modifier.fillMaxWidth(),
+				horizontalArrangement = Arrangement.SpaceBetween,
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				Row(
+					horizontalArrangement = Arrangement.spacedBy(12.dp),
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Box(
+						Modifier
+							.width(4.dp)
+							.height(20.dp)
+							.background(JellyfinTheme.colorScheme.buttonFocused, RoundedCornerShape(2.dp)),
+					)
+					Text(
+						"精选推荐",
+						color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.9f),
+						style = JellyfinTheme.typography.default.copy(
+							fontSize = 16.sp,
+							fontWeight = FontWeight.Bold,
+						),
+					)
+				}
+
+				if (featuredCount > 1) {
+					Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+						repeat(featuredCount) { i ->
+							Box(
+								Modifier
+									.size(width = if (i == heroIndex) 20.dp else 6.dp, height = 6.dp)
+									.background(
+										if (i == heroIndex) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.3f),
+										RoundedCornerShape(3.dp),
+									),
+							)
+						}
+					}
+				}
+			}
+
+			// Info panel + action buttons (bottom-left)
+			Column(
+				verticalArrangement = Arrangement.spacedBy(10.dp),
+			) {
 				Text(
-					overview,
-					color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.85f),
-					style = JellyfinTheme.typography.default,
-					maxLines = 3,
+					item?.name ?: "",
+					color = JellyfinTheme.colorScheme.onBackground,
+					style = JellyfinTheme.typography.default.copy(
+						fontSize = 34.sp,
+						fontWeight = FontWeight.Bold,
+					),
+					maxLines = 2,
 					overflow = TextOverflow.Ellipsis,
 				)
-			}
-			Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-				ArcticActionButton(R.drawable.ic_play, "播放", onPlay)
-				ArcticActionButton(R.drawable.ic_info, "详情", onInfo)
+
+				Text(
+					buildHeroMeta(item),
+					color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+					style = JellyfinTheme.typography.default.copy(
+						fontSize = 15.sp,
+					),
+					maxLines = 1,
+				)
+
+				item?.overview?.let { overview ->
+					Text(
+						overview,
+						color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.82f),
+						style = JellyfinTheme.typography.default.copy(fontSize = 16.sp),
+						maxLines = 2,
+						overflow = TextOverflow.Ellipsis,
+						modifier = Modifier.width(520.dp),
+					)
+				}
+
+				Row(
+					horizontalArrangement = Arrangement.spacedBy(16.dp),
+					verticalAlignment = Alignment.CenterVertically,
+					modifier = Modifier.padding(top = 8.dp),
+				) {
+					HeroPlayButton(onClick = onPlay)
+					HeroInfoButton(onClick = onInfo)
+				}
 			}
 		}
 	}
 }
 
 @Composable
-private fun ArcticActionButton(
-	icon: Int,
-	label: String,
-	onClick: () -> Unit,
-) {
+private fun HeroPlayButton(onClick: () -> Unit) {
 	var focused by remember { mutableStateOf(false) }
 
-	Row(
+	Box(
 		modifier = Modifier
+			.size(120.dp)
 			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.6f),
-				RoundedCornerShape(8.dp),
+				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.55f),
+				CircleShape,
+			)
+			.border(
+				width = if (focused) 0.dp else 1.dp,
+				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.25f),
+				shape = CircleShape,
 			)
 			.onFocusChanged { focused = it.hasFocus }
-			.clickable(onClick = onClick)
-			.padding(horizontal = 20.dp, vertical = 11.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(9.dp),
+			.clickable(onClick = onClick),
+		contentAlignment = Alignment.Center,
 	) {
 		Icon(
-			imageVector = ImageVector.vectorResource(icon),
+			imageVector = ImageVector.vectorResource(R.drawable.ic_play),
 			contentDescription = null,
 			tint = if (focused) JellyfinTheme.colorScheme.onButtonFocused else JellyfinTheme.colorScheme.onBackground,
-			modifier = Modifier.size(20.dp),
-		)
-		Text(
-			label,
-			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused else JellyfinTheme.colorScheme.onBackground,
-			style = JellyfinTheme.typography.default,
+			modifier = Modifier.size(44.dp),
 		)
 	}
+}
+
+@Composable
+private fun HeroInfoButton(onClick: () -> Unit) {
+	var focused by remember { mutableStateOf(false) }
+
+	Box(
+		modifier = Modifier
+			.size(60.dp)
+			.background(
+				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.55f),
+				CircleShape,
+			)
+			.border(
+				width = if (focused) 0.dp else 1.dp,
+				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.25f),
+				shape = CircleShape,
+			)
+			.onFocusChanged { focused = it.hasFocus }
+			.clickable(onClick = onClick),
+		contentAlignment = Alignment.Center,
+	) {
+		Icon(
+			imageVector = ImageVector.vectorResource(R.drawable.ic_info),
+			contentDescription = null,
+			tint = if (focused) JellyfinTheme.colorScheme.onButtonFocused else JellyfinTheme.colorScheme.onBackground,
+			modifier = Modifier.size(24.dp),
+		)
+	}
+}
+
+private fun buildHeroMeta(item: BaseItemDto?): String = buildString {
+	item ?: return@buildString
+	item.productionYear?.let { append(it); append("  ") }
+	item.communityRating?.let { append("★ "); append("%.1f".format(it)); append("  ") }
+	item.officialRating?.let { append(it); append("  ") }
+	val genres = item.genres?.take(3)?.joinToString(" / ")
+	if (!genres.isNullOrBlank()) append(genres)
 }
 
 @Composable
@@ -433,16 +584,32 @@ private fun ArcticRowView(
 	items: List<BaseItemDto>,
 	onItemClick: (BaseItemDto) -> Unit,
 ) {
-	Column(Modifier.padding(vertical = 10.dp)) {
-		Text(
-			title,
-			color = JellyfinTheme.colorScheme.listHeader,
-			style = JellyfinTheme.typography.default.copy(
-				fontWeight = FontWeight.Bold,
-				fontSize = 19.sp,
-			),
-			modifier = Modifier.padding(start = 44.dp, bottom = 10.dp),
-		)
+	Column(
+		Modifier
+			.fillMaxWidth()
+			.padding(top = 22.dp, bottom = 6.dp),
+	) {
+		Row(
+			modifier = Modifier
+				.padding(start = 44.dp, end = 44.dp, bottom = 12.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			horizontalArrangement = Arrangement.spacedBy(10.dp),
+		) {
+			Box(
+				Modifier
+					.width(4.dp)
+					.height(18.dp)
+					.background(JellyfinTheme.colorScheme.buttonFocused, RoundedCornerShape(2.dp)),
+			)
+			Text(
+				title,
+				color = JellyfinTheme.colorScheme.listHeader,
+				style = JellyfinTheme.typography.default.copy(
+					fontWeight = FontWeight.Bold,
+					fontSize = 19.sp,
+				),
+			)
+		}
 		LazyRow(
 			contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 44.dp, end = 44.dp),
 			horizontalArrangement = Arrangement.spacedBy(15.dp),
@@ -469,7 +636,6 @@ private fun ArcticCard(
 		modifier = modifier
 			.width(146.dp)
 			.height((146.dp / aspect))
-			// Grow on focus so the selection is obvious on a 10-foot UI
 			.scale(if (focused) 1.07f else 1f)
 			.onFocusChanged { focused = it.hasFocus }
 			.clickable(onClick = onClick),
@@ -486,7 +652,7 @@ private fun ArcticCard(
 			}
 		},
 		overlay = {
-			// Focus ring drawn ON TOP of the artwork (a background tint would be hidden by it)
+			// Focus ring drawn ON TOP of the artwork
 			if (focused) {
 				Box(
 					Modifier
@@ -502,8 +668,12 @@ private fun ArcticCard(
 				Modifier
 					.fillMaxWidth()
 					.align(Alignment.BottomStart)
-					.background(JellyfinTheme.colorScheme.surface.copy(alpha = 0.72f))
-					.padding(7.dp),
+					.background(
+						Brush.verticalGradient(
+							colors = listOf(Color.Transparent, JellyfinTheme.colorScheme.background.copy(alpha = 0.85f)),
+						),
+					)
+					.padding(8.dp),
 			) {
 				Text(
 					item.name ?: "",
