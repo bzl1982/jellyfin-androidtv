@@ -20,13 +20,21 @@
 
     <style name="Theme.Jellyfin.Infuse" parent="Theme.Jellyfin">
         <item name="android:colorPrimary">@color/theme_infuse_dark</item>
+        <item name="colorPrimary">@color/theme_infuse_dark</item>
         <item name="android:colorPrimaryDark">@color/theme_infuse_black</item>
+        <item name="colorPrimaryDark">@color/theme_infuse_black</item>
         <item name="android:colorAccent">@color/theme_infuse_light</item>
-        <item name="defaultBackground">@drawable/moviebg</item>
+        <item name="colorAccent">@color/theme_infuse_light</item>
+        <item name="android:windowBackground">@color/theme_infuse_black</item>
+        <item name="defaultBackground">@color/theme_infuse_black</item>
+        <item name="cardViewBackground">@color/theme_infuse_grey</item>
         <item name="defaultSearchColor">@color/theme_infuse_light</item>
         <item name="progressPrimary">@color/theme_infuse_light</item>
         <item name="progressSecondary">@color/theme_infuse_dark</item>
         <item name="popupMenuBackground">@color/theme_infuse_black</item>
+        <item name="buttonDefaultNormalBackground">@color/theme_infuse_black</item>
+        <item name="buttonDefaultHighlightBackground">@color/theme_infuse_light</item>
+        <item name="headerTextColor">@color/white</item>
 
         <!-- v1.1 新增 token 注入 (供未来 Compose 布局使用) -->
         <item name="matchGreen">@color/theme_infuse_amber</item>  <!-- Infuse 用暖琥珀替代匹配绿 -->
