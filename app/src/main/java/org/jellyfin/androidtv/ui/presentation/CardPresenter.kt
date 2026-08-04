@@ -308,6 +308,7 @@ private fun CardViewHolderContent(
 
 	val card = @Composable {
 		ItemCard(
+			focused = focused,
 			image = {
 				if (image != null) {
 					val api = koinInject<ApiClient>()
@@ -355,7 +356,7 @@ private fun CardViewHolderContent(
 								Box(
 									modifier = Modifier
 										.fillMaxWidth()
-										.background(Tokens.Color.colorBluegrey900.copy(alpha = 0.6f), JellyfinTheme.shapes.extraSmall),
+										.background(JellyfinTheme.colorScheme.surface.copy(alpha = 0.6f), JellyfinTheme.shapes.extraSmall),
 								) {
 									Text(
 										text = title,
