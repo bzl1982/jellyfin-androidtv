@@ -7,7 +7,7 @@ import androidx.compose.runtime.ReadOnlyComposable
 
 @Composable
 fun JellyfinTheme(
-	colorScheme: ColorScheme = JellyfinTheme.colorScheme,
+	colorScheme: ColorScheme = dynamicColorScheme(),
 	shapes: Shapes = JellyfinTheme.shapes,
 	typography: Typography = JellyfinTheme.typography,
 	content: @Composable () -> Unit
