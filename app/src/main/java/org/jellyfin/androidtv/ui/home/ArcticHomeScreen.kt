@@ -311,7 +311,11 @@ private fun ArcticMainContent(
 				Text("加载中…", color = JellyfinTheme.colorScheme.onBackground)
 			}
 		} else {
-			ArcticHero(hero, onHeroPlay, onHeroInfo)
+			ArcticHero(
+				item = hero,
+				onPlay = { hero?.let(onHeroPlay) },
+				onInfo = { hero?.let(onHeroInfo) },
+			)
 			Spacer(Modifier.height(8.dp))
 			rows.forEach { ArcticRowView(it.title, it.items, onItemClick) }
 			Spacer(Modifier.height(48.dp))
