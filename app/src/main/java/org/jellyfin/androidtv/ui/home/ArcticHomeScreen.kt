@@ -2,8 +2,8 @@ package org.jellyfin.androidtv.ui.home
 
 import android.widget.ImageView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,7 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -56,6 +56,9 @@ import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.ui.settings.compat.SettingsViewModel
 import org.jellyfin.androidtv.util.apiclient.JellyfinImage
+import org.jellyfin.androidtv.util.apiclient.getUrl
+import org.jellyfin.androidtv.util.apiclient.itemBackdropImages
+import org.jellyfin.androidtv.util.apiclient.itemImages
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
@@ -221,12 +224,13 @@ private fun ArcticSidebar(
 		}
 	}
 
-	LaunchedEffect(initialFocus) { initialFocus.requestFocus() }
+	// Guarded: the FocusRequester may not be attached yet on the first frame
+	LaunchedEffect(initialFocus) { runCatching { initialFocus.requestFocus() } }
 }
 
 private fun collectionIcon(type: CollectionType?): Int = when (type) {
 	CollectionType.MOVIES -> R.drawable.ic_movie
-	CollectionType.TV_SHOWS -> R.drawable.ic_tv
+	CollectionType.TVSHOWS -> R.drawable.ic_tv
 	CollectionType.MUSIC -> R.drawable.ic_star
 	CollectionType.PHOTOS -> R.drawable.ic_photo
 	CollectionType.LIVETV -> R.drawable.ic_tv
@@ -243,12 +247,13 @@ private fun SidebarItem(
 	Row(
 		modifier = modifier
 			.fillMaxWidth()
-			.clickable(onClick = entry.onClick)
-			.onFocusChanged { focused = it.hasFocus }
 			.background(
 				if (focused) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.22f)
 				else Color.Transparent,
 			)
+			// onFocusChanged MUST precede the focusable/clickable modifier it observes
+			.onFocusChanged { focused = it.hasFocus }
+			.clickable(onClick = entry.onClick)
 			.padding(horizontal = 20.dp, vertical = 15.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -394,12 +399,12 @@ private fun ArcticActionButton(
 
 	Row(
 		modifier = Modifier
-			.clickable(onClick = onClick)
-			.onFocusChanged { focused = it.hasFocus }
 			.background(
 				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.6f),
 				RoundedCornerShape(8.dp),
 			)
+			.onFocusChanged { focused = it.hasFocus }
+			.clickable(onClick = onClick)
 			.padding(horizontal = 20.dp, vertical = 11.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(9.dp),
@@ -460,8 +465,10 @@ private fun ArcticCard(
 		modifier = modifier
 			.width(146.dp)
 			.height((146.dp / aspect))
-			.clickable(onClick = onClick)
-			.onFocusChanged { focused = it.hasFocus },
+			// Grow on focus so the selection is obvious on a 10-foot UI
+			.scale(if (focused) 1.07f else 1f)
+			.onFocusChanged { focused = it.hasFocus }
+			.clickable(onClick = onClick),
 		focused = focused,
 		image = {
 			if (image != null) {
@@ -475,6 +482,18 @@ private fun ArcticCard(
 			}
 		},
 		overlay = {
+			// Focus ring drawn ON TOP of the artwork (a background tint would be hidden by it)
+			if (focused) {
+				Box(
+					Modifier
+						.fillMaxSize()
+						.border(
+							width = 3.dp,
+							color = JellyfinTheme.colorScheme.buttonFocused,
+							shape = JellyfinTheme.shapes.medium,
+						),
+				)
+			}
 			Box(
 				Modifier
 					.fillMaxWidth()
