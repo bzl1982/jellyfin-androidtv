@@ -32,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -182,17 +183,9 @@ fun ArcticHomeScreen() {
 		heroIndex = (heroIndex + 1) % featuredItems.size
 	}
 
-	Row(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
-		ArcticSidebar(
-			libraries = libraries,
-			initialFocus = sidebarFocus,
-			onHome = { navigationRepository.navigate(Destinations.home, replace = true) },
-			onSearch = { navigationRepository.navigate(Destinations.search()) },
-			onSettings = { settingsViewModel.show() },
-			onLibrary = { navigationRepository.navigate(Destinations.libraryBrowser(it)) },
-		)
+	Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
 		ArcticMainContent(
-			modifier = Modifier.weight(1f).fillMaxHeight(),
+			modifier = Modifier.fillMaxSize(),
 			hero = featuredItems.getOrNull(heroIndex),
 			featuredCount = featuredItems.size,
 			heroIndex = heroIndex,
@@ -202,6 +195,16 @@ fun ArcticHomeScreen() {
 			onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
 			onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
 			onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
+		)
+
+		// Immersive sidebar floating on top of the backdrop, not a solid panel.
+		ArcticSidebar(
+			libraries = libraries,
+			initialFocus = sidebarFocus,
+			onHome = { navigationRepository.navigate(Destinations.home, replace = true) },
+			onSearch = { navigationRepository.navigate(Destinations.search()) },
+			onSettings = { settingsViewModel.show() },
+			onLibrary = { navigationRepository.navigate(Destinations.libraryBrowser(it)) },
 		)
 	}
 }
@@ -226,18 +229,35 @@ private fun ArcticSidebar(
 		add(SidebarEntry(R.drawable.ic_settings, "设置", onSettings))
 	}
 
-	Column(
-		modifier = Modifier
-			.width(232.dp)
-			.fillMaxHeight()
-			.background(JellyfinTheme.colorScheme.surface.copy(alpha = 0.94f))
-			.padding(top = 28.dp, bottom = 28.dp),
-	) {
-		entries.forEachIndexed { index, entry ->
-			SidebarItem(
-				entry = entry,
-				modifier = if (index == 0) Modifier.focusRequester(initialFocus) else Modifier,
-			)
+	Box(Modifier.fillMaxHeight().width(210.dp)) {
+		// Subtle left-side scrim so text remains readable over bright backdrops,
+		// but the menu still feels merged into the page (FUSE 2: dim-thick-side-full.png).
+		Box(
+			Modifier
+				.fillMaxHeight()
+				.width(200.dp)
+				.background(
+					Brush.horizontalGradient(
+						colors = listOf(
+							JellyfinTheme.colorScheme.background.copy(alpha = 0.78f),
+							JellyfinTheme.colorScheme.background.copy(alpha = 0.45f),
+							Color.Transparent,
+						),
+					),
+				),
+		)
+
+		Column(
+			modifier = Modifier
+				.fillMaxHeight()
+				.padding(top = 48.dp, bottom = 48.dp, start = 18.dp, end = 18.dp),
+		) {
+			entries.forEachIndexed { index, entry ->
+				SidebarItem(
+					entry = entry,
+					modifier = if (index == 0) Modifier.focusRequester(initialFocus) else Modifier,
+				)
+			}
 		}
 	}
 
@@ -265,33 +285,29 @@ private fun SidebarItem(
 	Row(
 		modifier = modifier
 			.fillMaxWidth()
-			.padding(horizontal = 16.dp, vertical = 5.dp)
+			.padding(vertical = 3.dp)
 			.background(
-				if (selected) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.18f) else Color.Transparent,
-				RoundedCornerShape(12.dp),
-			)
-			.border(
-				width = if (selected) 2.dp else 0.dp,
-				color = if (selected) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
-				shape = RoundedCornerShape(12.dp),
+				if (selected) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.16f) else Color.Transparent,
+				RoundedCornerShape(10.dp),
 			)
 			// onFocusChanged MUST precede the focusable/clickable modifier it observes
 			.onFocusChanged { focused = it.hasFocus }
 			.clickable(onClick = entry.onClick)
-			.padding(horizontal = 14.dp, vertical = 12.dp),
+			.padding(horizontal = 12.dp, vertical = 10.dp),
 		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(16.dp),
+		horizontalArrangement = Arrangement.spacedBy(14.dp),
 	) {
 		Icon(
 			imageVector = ImageVector.vectorResource(entry.icon),
 			contentDescription = null,
-			tint = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-			modifier = Modifier.size(23.dp),
+			tint = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.35f),
+			modifier = Modifier.size(20.dp),
 		)
 		Text(
 			entry.label,
-			color = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+			color = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f),
 			style = JellyfinTheme.typography.default.copy(
+				fontSize = 15.sp,
 				fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
 			),
 		)
@@ -319,16 +335,22 @@ private fun ArcticMainContent(
 		val heroHeight = maxHeight * 0.58f
 
 		Column(Modifier.fillMaxSize()) {
-			ArcticHeroStage(
+			// Pad the stage so the artwork is clearly contained and does not bleed to the edges.
+			Box(
 				modifier = Modifier
 					.fillMaxWidth()
-					.height(heroHeight),
-				item = hero,
-				featuredCount = featuredCount,
-				heroIndex = heroIndex,
-				onPlay = { hero?.let(onHeroPlay) },
-				onInfo = { hero?.let(onHeroInfo) },
-			)
+					.height(heroHeight)
+					.padding(horizontal = 18.dp, vertical = 14.dp),
+			) {
+				ArcticHeroStage(
+					modifier = Modifier.fillMaxSize(),
+					item = hero,
+					featuredCount = featuredCount,
+					heroIndex = heroIndex,
+					onPlay = { hero?.let(onHeroPlay) },
+					onInfo = { hero?.let(onHeroInfo) },
+				)
+			}
 
 			val scrollState = rememberScrollState()
 			Column(
@@ -370,7 +392,15 @@ private fun ArcticHeroStage(
 	val backdrop: JellyfinImage? = item?.itemBackdropImages?.firstOrNull()
 		?: item?.itemImages?.values?.firstOrNull()
 
-	Box(modifier = modifier) {
+	Box(
+		modifier = modifier
+			.clip(RoundedCornerShape(18.dp))
+			.border(
+				width = 1.5.dp,
+				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.12f),
+				shape = RoundedCornerShape(18.dp),
+			),
+	) {
 		// Full-bleed backdrop with crossfade when the featured item changes
 		Crossfade(
 			targetState = backdrop?.getUrl(api, maxWidth = 1280),
@@ -418,7 +448,7 @@ private fun ArcticHeroStage(
 		Column(
 			modifier = Modifier
 				.fillMaxSize()
-				.padding(start = 44.dp, end = 44.dp, top = 30.dp, bottom = 34.dp),
+				.padding(start = 36.dp, end = 36.dp, top = 24.dp, bottom = 28.dp),
 			verticalArrangement = Arrangement.SpaceBetween,
 		) {
 			// Header label + page dots
@@ -591,7 +621,7 @@ private fun ArcticRowView(
 	) {
 		Row(
 			modifier = Modifier
-				.padding(start = 44.dp, end = 44.dp, bottom = 12.dp),
+				.padding(start = 36.dp, end = 36.dp, bottom = 12.dp),
 			verticalAlignment = Alignment.CenterVertically,
 			horizontalArrangement = Arrangement.spacedBy(10.dp),
 		) {
@@ -611,7 +641,7 @@ private fun ArcticRowView(
 			)
 		}
 		LazyRow(
-			contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 44.dp, end = 44.dp),
+			contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 36.dp, end = 36.dp),
 			horizontalArrangement = Arrangement.spacedBy(15.dp),
 		) {
 			items(items, key = { it.id }) { item ->
