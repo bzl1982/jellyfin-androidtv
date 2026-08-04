@@ -361,6 +361,13 @@
     <string name="pref_theme_muted_purple">Muted purple</string>
     <string name="pref_theme_netflix">Netflix (Black &amp; Red)</string>
     <string name="pref_theme_infuse">Infuse (Orange)</string>
+    <!-- v1.1 Hero layout labels (referenced by Netflix / Infuse theme) -->
+    <string name="lbl_match_score">Match %1$d%%</string>
+    <string name="lbl_hdr">HDR</string>
+    <string name="lbl_4k">4K</string>
+    <string name="lbl_hero_brand_netflix">NETFLIX</string>
+    <string name="lbl_hero_brand_infuse">Infuse</string>
+    <string name="lbl_popular">Popular this week</string>
     <string name="no_network_permissions">Jellyfin requires network permissions to function</string>
     <string name="press_to_close">Press to close</string>
     <string name="saved_servers">Saved servers</string>
