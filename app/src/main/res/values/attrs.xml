@@ -28,7 +28,12 @@
         <!-- QR drawables -->
         <attr name="qrBackground" format="color" />
         <attr name="qrForeground" format="color" />
-    </declare-styleable>
+            <!-- v1.1 Custom theme tokens (Netflix / Infuse) -->
+        <attr name="matchGreen" format="reference|color" />
+        <attr name="heroOverlay" format="reference|color" />
+        <attr name="hdrLabelBg" format="reference|color" />
+        <attr name="brandAnchor" format="reference|color" />
+</declare-styleable>
     <declare-styleable name="StrokeTextView">
         <attr name="strokeWidth" format="float" />
     </declare-styleable>
