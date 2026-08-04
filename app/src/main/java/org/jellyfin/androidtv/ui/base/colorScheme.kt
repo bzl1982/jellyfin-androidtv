@@ -45,7 +45,7 @@ fun colorScheme(): ColorScheme = ColorScheme(
 
 /**
  * Build a [ColorScheme] by reading the current Android theme attributes.
- * This allows the XML theme (Jellyfin / Netflix / Infuse) to influence
+ * This allows the XML theme (LORLA / Tablets / Tablets II) to influence
  * Compose-based UI without hard-coding every color.
  */
 @Composable

@@ -310,14 +310,14 @@
     <string name="lbl_switch_user">切换账户</string>
     <string name="no_network_permissions">Jellyfin需要网络权限才能运行</string>
     <string name="pref_theme_muted_purple">淡紫色</string>
-    <string name="pref_theme_netflix">网飞（黑红）</string>
-    <string name="pref_theme_infuse">Infuse（橙）</string>
+    <string name="pref_theme_netflix">药片（黑红）</string>
+    <string name="pref_theme_infuse">药片 II（橙）</string>
     <!-- v1.1 Hero 布局标签 -->
     <string name="lbl_match_score">匹配度 %1$d%%</string>
     <string name="lbl_hdr">HDR</string>
     <string name="lbl_4k">4K</string>
-    <string name="lbl_hero_brand_netflix">网飞</string>
-    <string name="lbl_hero_brand_infuse">Infuse</string>
+    <string name="lbl_hero_brand_netflix">洛拉</string>
+    <string name="lbl_hero_brand_infuse">洛拉</string>
     <string name="lbl_popular">本周热门</string>
     <string name="lbl_episode_number">第%1$d集</string>
     <string name="lbl_season_number">第%1$d季</string>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="app_name_release" translatable="false" tools:ignore="UnusedResources">Jellyfin</string>
-    <string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">Jellyfin Debug</string>
+    <string name="app_name_release" translatable="false" tools:ignore="UnusedResources">LORLA</string>
+    <string name="app_name_debug" translatable="false" tools:ignore="UnusedResources">LORLA Debug</string>
     <string name="video_error_unknown_error">Failed to load video</string>
     <string name="loading">Loading…</string>
     <string name="btn_cancel">Cancel</string>
@@ -359,14 +359,14 @@
     <string name="user_picker_last_user_summary">Use the last active account</string>
     <string name="lbl_switch_user">Switch account</string>
     <string name="pref_theme_muted_purple">Muted purple</string>
-    <string name="pref_theme_netflix">Netflix (Black &amp; Red)</string>
-    <string name="pref_theme_infuse">Infuse (Orange)</string>
-    <!-- v1.1 Hero layout labels (referenced by Netflix / Infuse theme) -->
+    <string name="pref_theme_netflix">Tablets (Black &amp; Red)</string>
+    <string name="pref_theme_infuse">Tablets II (Orange)</string>
+    <!-- v1.1 Hero layout labels (referenced by Tablets / Tablets II themes) -->
     <string name="lbl_match_score">Match %1$d%%</string>
     <string name="lbl_hdr">HDR</string>
     <string name="lbl_4k">4K</string>
-    <string name="lbl_hero_brand_netflix">NETFLIX</string>
-    <string name="lbl_hero_brand_infuse">Infuse</string>
+    <string name="lbl_hero_brand_netflix">LORLA</string>
+    <string name="lbl_hero_brand_infuse">LORLA</string>
     <string name="lbl_popular">Popular this week</string>
     <string name="no_network_permissions">Jellyfin requires network permissions to function</string>
     <string name="press_to_close">Press to close</string>

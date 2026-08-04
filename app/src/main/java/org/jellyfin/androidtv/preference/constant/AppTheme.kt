@@ -22,12 +22,12 @@ enum class AppTheme(
 	MUTED_PURPLE(R.string.pref_theme_muted_purple),
 
 	/**
-	 * Netflix-style black & red theme (custom)
+	 * LORLA "Tablets" black & red theme (custom)
 	 */
 	NETFLIX(R.string.pref_theme_netflix),
 
 	/**
-	 * Infuse-style warm orange theme (custom)
+	 * LORLA "Tablets II" warm orange theme (custom)
 	 */
 	INFUSE(R.string.pref_theme_infuse),
 }
