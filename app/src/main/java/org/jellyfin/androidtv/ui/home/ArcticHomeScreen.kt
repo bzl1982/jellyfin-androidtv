@@ -1,6 +1,7 @@
 package org.jellyfin.androidtv.ui.home
 
 import android.widget.ImageView
+import android.widget.Toast
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -48,6 +49,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,20 +96,38 @@ data class ArcticRow(
 private data class SidebarEntry(
 	val icon: Int,
 	val label: String,
-	val onClick: () -> Unit,
+	val filter: CategoryFilter,
 )
+
+private sealed class CategoryFilter {
+	data object Home : CategoryFilter()
+	data object Search : CategoryFilter()
+	data object Settings : CategoryFilter()
+	data object MovieChina : CategoryFilter()
+	data object MovieHK : CategoryFilter()
+	data object MovieJP : CategoryFilter()
+	data object MovieUS : CategoryFilter()
+	data object TVChina : CategoryFilter()
+	data object TVHK : CategoryFilter()
+	data object TVJP : CategoryFilter()
+	data object TVUS : CategoryFilter()
+	data object Variety : CategoryFilter()
+	data object Animation : CategoryFilter()
+	data object Documentary : CategoryFilter()
+}
 
 /**
  * Six home layout modes translated from the FUSE 2 reference screenshots.
  * Mode 0 is the existing portrait-poster look; modes 1-5 replicate the 5 screenshots.
+ * LARGE_LANDSCAPE is the full-screen hero mode and hides the rows below it.
  */
 private enum class HomeLayoutMode {
-	PORTRAIT_POSTERS,   // current default
-	WIDE_INFO_CARDS,    // 003
-	LANDSCAPE_CARDS,    // 004
-	CIRCULAR_DISCS,     // 008
-	PORTRAIT_WITH_BAR,  // 011
-	LARGE_LANDSCAPE,    // 028
+	PORTRAIT_POSTERS,   // 竖版海报
+	WIDE_INFO_CARDS,    // 宽信息卡
+	LANDSCAPE_CARDS,    // 横向海报
+	CIRCULAR_DISCS,     // 圆形光盘
+	PORTRAIT_WITH_BAR,  // 竖版+信息栏
+	LARGE_LANDSCAPE,    // 大海报
 }
 
 private val HomeLayoutMode.label: String
@@ -119,10 +140,14 @@ private val HomeLayoutMode.label: String
 		HomeLayoutMode.LARGE_LANDSCAPE -> "大海报"
 	}
 
+private val HomeLayoutMode.isFullScreenHero: Boolean
+	get() = this == HomeLayoutMode.LARGE_LANDSCAPE
+
 // endregion
 
 @Composable
 fun ArcticHomeScreen() {
+	val context = LocalContext.current
 	val api = koinInject<ApiClient>()
 	val userViewsRepository = koinInject<UserViewsRepository>()
 	val navigationRepository = koinInject<NavigationRepository>()
@@ -133,8 +158,7 @@ fun ArcticHomeScreen() {
 	var rows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
 	var loaded by remember { mutableStateOf(false) }
 
-	// UI toggles (will be persisted through the settings page later).
-	var rowsVisible by remember { mutableStateOf(true) }
+	var selectedCategory by remember { mutableStateOf<CategoryFilter>(CategoryFilter.Home) }
 	var layoutMode by remember { mutableStateOf(HomeLayoutMode.PORTRAIT_POSTERS) }
 	var sidebarExpanded by remember { mutableStateOf(false) }
 
@@ -173,7 +197,7 @@ fun ArcticHomeScreen() {
 				imageTypeLimit = 1,
 			).content.items.orEmpty()
 
-			val perLibrary = views.take(6).mapNotNull { view ->
+			val perLibrary = views.mapNotNull { view ->
 				val items = api.userLibraryApi.getLatestMedia(
 					parentId = view.id,
 					limit = 20,
@@ -215,6 +239,8 @@ fun ArcticHomeScreen() {
 		heroIndex = (heroIndex + 1) % featuredItems.size
 	}
 
+	val displayRows = remember(rows, selectedCategory) { filterRows(rows, selectedCategory) }
+
 	Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
 		// 1) Full-screen fanart background.
 		ArcticBackground(
@@ -222,52 +248,99 @@ fun ArcticHomeScreen() {
 			modifier = Modifier.fillMaxSize(),
 		)
 
-		// 2) Main content (full width) - sits under the sidebar.
-		ArcticMainContent(
-			modifier = Modifier.fillMaxSize(),
-			hero = featuredItems.getOrNull(heroIndex),
-			featuredCount = featuredItems.size,
-			heroIndex = heroIndex,
-			onHeroIndexChange = { heroIndex = it },
-			rows = rows,
-			loaded = loaded,
-			rowsVisible = rowsVisible,
-			layoutMode = layoutMode,
-			onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
-			onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
-			onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
-			onToggleRows = { rowsVisible = !rowsVisible },
-			onCycleLayoutMode = { layoutMode = HomeLayoutMode.entries[(layoutMode.ordinal + 1) % HomeLayoutMode.entries.size] },
-			initialFocus = mainContentFocus,
-		)
+		// 2) Sidebar + main content in a Row so the main content is pushed right when the sidebar expands.
+		Row(Modifier.fillMaxSize()) {
+			ArcticSidebar(
+				expanded = sidebarExpanded,
+				onExpandedChange = { sidebarExpanded = it },
+				initialFocus = sidebarFocus,
+				onHome = {
+					selectedCategory = CategoryFilter.Home
+					sidebarExpanded = false
+					runCatching { mainContentFocus.requestFocus() }
+				},
+				onSearch = {
+					sidebarExpanded = false
+					navigationRepository.navigate(Destinations.search())
+				},
+				onSettings = {
+					sidebarExpanded = false
+					navigationRepository.navigate(Destinations.fuseSettings)
+				},
+				onCategory = { filter ->
+					selectedCategory = filter
+					sidebarExpanded = false
+					runCatching { mainContentFocus.requestFocus() }
+					if (filter !is CategoryFilter.Home &&
+						filter !is CategoryFilter.Search &&
+						filter !is CategoryFilter.Settings
+					) {
+						Toast.makeText(context, "正在加载 ${categoryLabel(filter)}", Toast.LENGTH_SHORT).show()
+					}
+				},
+			)
 
-		// 3) Floating auto-hide sidebar.
-		ArcticSidebar(
-			libraries = libraries,
-			expanded = sidebarExpanded,
-			onExpandedChange = { sidebarExpanded = it },
-			initialFocus = sidebarFocus,
-			onHome = {
-				sidebarExpanded = false
-				navigationRepository.navigate(Destinations.home, replace = true)
-			},
-			onSearch = {
-				sidebarExpanded = false
-				navigationRepository.navigate(Destinations.search())
-			},
-			onSettings = {
-				sidebarExpanded = false
-				navigationRepository.navigate(Destinations.fuseSettings)
-			},
-			onLibrary = {
-				sidebarExpanded = false
-				navigationRepository.navigate(Destinations.libraryBrowser(it))
-			},
-		)
+			// 3) Main content area: scrollable, rows sit below the hero stage.
+			ArcticMainContent(
+				modifier = Modifier.weight(1f).fillMaxHeight(),
+				hero = featuredItems.getOrNull(heroIndex),
+				featuredCount = featuredItems.size,
+				heroIndex = heroIndex,
+				onHeroIndexChange = { heroIndex = it },
+				rows = displayRows,
+				loaded = loaded,
+				layoutMode = layoutMode,
+				onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
+				onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
+				onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
+				onCycleLayoutMode = { layoutMode = HomeLayoutMode.entries[(layoutMode.ordinal + 1) % HomeLayoutMode.entries.size] },
+				initialFocus = mainContentFocus,
+			)
+		}
 	}
 
 	// Initial focus goes to the main content, not the sidebar, so the sidebar stays collapsed.
 	LaunchedEffect(Unit) { runCatching { mainContentFocus.requestFocus() } }
+}
+
+private fun categoryLabel(filter: CategoryFilter): String = when (filter) {
+	is CategoryFilter.Home -> "首页"
+	is CategoryFilter.Search -> "搜索"
+	is CategoryFilter.Settings -> "系统设置"
+	is CategoryFilter.MovieChina -> "国内电影"
+	is CategoryFilter.MovieHK -> "港台电影"
+	is CategoryFilter.MovieJP -> "日韩电影"
+	is CategoryFilter.MovieUS -> "欧美电影"
+	is CategoryFilter.TVChina -> "国内剧集"
+	is CategoryFilter.TVHK -> "港台剧集"
+	is CategoryFilter.TVJP -> "日韩剧集"
+	is CategoryFilter.TVUS -> "欧美剧集"
+	is CategoryFilter.Variety -> "国内综艺"
+	is CategoryFilter.Animation -> "国内动漫"
+	is CategoryFilter.Documentary -> "国内纪录片"
+}
+
+private fun filterRows(rows: List<ArcticRow>, filter: CategoryFilter): List<ArcticRow> {
+	return when (filter) {
+		is CategoryFilter.Home,
+		is CategoryFilter.Search,
+		is CategoryFilter.Settings -> rows
+		is CategoryFilter.MovieChina -> rows.filterTitle("国产", "国内", "电影")
+		is CategoryFilter.MovieHK -> rows.filterTitle("港台", "香港", "台湾")
+		is CategoryFilter.MovieJP -> rows.filterTitle("日韩", "日本", "韩国")
+		is CategoryFilter.MovieUS -> rows.filterTitle("欧美", "美国", "欧洲", "西部")
+		is CategoryFilter.TVChina -> rows.filterTitle("国产", "国内", "剧集", "电视剧")
+		is CategoryFilter.TVHK -> rows.filterTitle("港台", "香港", "台湾", "剧集", "电视剧")
+		is CategoryFilter.TVJP -> rows.filterTitle("日韩", "日本", "韩国", "剧集", "电视剧")
+		is CategoryFilter.TVUS -> rows.filterTitle("欧美", "美国", "欧洲", "剧集", "电视剧")
+		is CategoryFilter.Variety -> rows.filterTitle("综艺", "综合")
+		is CategoryFilter.Animation -> rows.filterTitle("动漫", "动画", "卡通")
+		is CategoryFilter.Documentary -> rows.filterTitle("纪录", "纪实")
+	}
+}
+
+private fun List<ArcticRow>.filterTitle(vararg keywords: String): List<ArcticRow> {
+	return filter { row -> keywords.any { row.title.contains(it, ignoreCase = true) } }
 }
 
 // region Background
@@ -345,22 +418,31 @@ private fun ArcticBackground(
 
 @Composable
 private fun ArcticSidebar(
-	libraries: List<BaseItemDto>,
 	expanded: Boolean,
 	onExpandedChange: (Boolean) -> Unit,
 	initialFocus: FocusRequester,
 	onHome: () -> Unit,
 	onSearch: () -> Unit,
 	onSettings: () -> Unit,
-	onLibrary: (BaseItemDto) -> Unit,
+	onCategory: (CategoryFilter) -> Unit,
 ) {
-	val entries = buildList {
-		add(SidebarEntry(R.drawable.ic_grid, "首页", onHome))
-		add(SidebarEntry(R.drawable.ic_search, "搜索", onSearch))
-		libraries.take(4).forEach { view ->
-			add(SidebarEntry(collectionIcon(view.collectionType), view.name ?: "", { onLibrary(view) }))
-		}
-		add(SidebarEntry(R.drawable.ic_settings, "设置", onSettings))
+	val entries = remember {
+		listOf(
+			SidebarEntry(R.drawable.ic_house, "首页", CategoryFilter.Home),
+			SidebarEntry(R.drawable.ic_search, "搜索", CategoryFilter.Search),
+			SidebarEntry(R.drawable.ic_movie, "国内电影", CategoryFilter.MovieChina),
+			SidebarEntry(R.drawable.ic_tv_play, "港台电影", CategoryFilter.MovieHK),
+			SidebarEntry(R.drawable.ic_play, "日韩电影", CategoryFilter.MovieJP),
+			SidebarEntry(R.drawable.ic_star, "欧美电影", CategoryFilter.MovieUS),
+			SidebarEntry(R.drawable.ic_tv, "国内剧集", CategoryFilter.TVChina),
+			SidebarEntry(R.drawable.ic_tv_guide, "港台剧集", CategoryFilter.TVHK),
+			SidebarEntry(R.drawable.ic_masks, "日韩剧集", CategoryFilter.TVJP),
+			SidebarEntry(R.drawable.ic_clapperboard, "欧美剧集", CategoryFilter.TVUS),
+			SidebarEntry(R.drawable.ic_heart, "国内综艺", CategoryFilter.Variety),
+			SidebarEntry(R.drawable.ic_album, "国内动漫", CategoryFilter.Animation),
+			SidebarEntry(R.drawable.ic_camera, "国内纪录片", CategoryFilter.Documentary),
+			SidebarEntry(R.drawable.ic_settings, "系统设置", CategoryFilter.Settings),
+		)
 	}
 
 	val targetWidth by animateDpAsState(
@@ -385,9 +467,9 @@ private fun ArcticSidebar(
 					1.00f to Color.Transparent,
 				),
 			)
-			.padding(top = 240.dp, bottom = 240.dp),
+			.padding(vertical = 120.dp),
 		horizontalAlignment = Alignment.CenterHorizontally,
-		verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+		verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.Top),
 	) {
 		entries.forEachIndexed { index, entry ->
 			SidebarItem(
@@ -395,18 +477,17 @@ private fun ArcticSidebar(
 				expanded = expanded,
 				modifier = if (index == 0) Modifier.focusRequester(initialFocus) else Modifier,
 				onFocusChange = { focusStates[index].value = it },
+				onClick = {
+					when (entry.filter) {
+						is CategoryFilter.Home -> onHome()
+						is CategoryFilter.Search -> onSearch()
+						is CategoryFilter.Settings -> onSettings()
+						else -> onCategory(entry.filter)
+					}
+				},
 			)
 		}
 	}
-}
-
-private fun collectionIcon(type: CollectionType?): Int = when (type) {
-	CollectionType.MOVIES -> R.drawable.ic_movie
-	CollectionType.TVSHOWS -> R.drawable.ic_tv
-	CollectionType.MUSIC -> R.drawable.ic_star
-	CollectionType.PHOTOS -> R.drawable.ic_photo
-	CollectionType.LIVETV -> R.drawable.ic_tv
-	else -> R.drawable.ic_grid
 }
 
 @Composable
@@ -414,6 +495,7 @@ private fun SidebarItem(
 	entry: SidebarEntry,
 	expanded: Boolean,
 	onFocusChange: (Boolean) -> Unit = {},
+	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
 	var focused by remember { mutableStateOf(false) }
@@ -422,8 +504,8 @@ private fun SidebarItem(
 	Row(
 		modifier = modifier
 			.fillMaxWidth()
-			.height(56.dp)
-			.padding(horizontal = if (expanded) 14.dp else 8.dp)
+			.height(50.dp)
+			.padding(horizontal = if (expanded) 12.dp else 8.dp)
 			.background(
 				if (selected) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.16f) else Color.Transparent,
 				RoundedCornerShape(10.dp),
@@ -432,8 +514,8 @@ private fun SidebarItem(
 				focused = it.hasFocus
 				onFocusChange(it.hasFocus)
 			}
-			.clickable(onClick = entry.onClick)
-			.padding(horizontal = if (expanded) 14.dp else 0.dp)
+			.clickable(onClick = onClick)
+			.padding(horizontal = if (expanded) 12.dp else 0.dp)
 			.animateContentSize(),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = if (expanded) Arrangement.spacedBy(12.dp, Alignment.Start) else Arrangement.Center,
@@ -441,14 +523,14 @@ private fun SidebarItem(
 		Icon(
 			imageVector = ImageVector.vectorResource(entry.icon),
 			contentDescription = entry.label,
-			tint = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+			tint = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.70f),
 			modifier = Modifier.size(22.dp),
 		)
 
 		if (expanded) {
 			Text(
 				entry.label,
-				color = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+				color = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.85f),
 				style = JellyfinTheme.typography.default.copy(
 					fontSize = 14.sp,
 					fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
@@ -473,67 +555,78 @@ private fun ArcticMainContent(
 	onHeroIndexChange: (Int) -> Unit,
 	rows: List<ArcticRow>,
 	loaded: Boolean,
-	rowsVisible: Boolean,
 	layoutMode: HomeLayoutMode,
 	onItemClick: (BaseItemDto) -> Unit,
 	onHeroPlay: (BaseItemDto) -> Unit,
 	onHeroInfo: (BaseItemDto) -> Unit,
-	onToggleRows: () -> Unit,
 	onCycleLayoutMode: () -> Unit,
 	initialFocus: FocusRequester,
 ) {
+	val configuration = LocalConfiguration.current
+	val screenHeight = configuration.screenHeightDp.dp
+
+	// In full-screen hero mode the stage takes the whole screen and rows are hidden.
+	// In all other modes the hero is a top stage and the rows scroll underneath.
+	val heroHeight = if (layoutMode.isFullScreenHero) screenHeight else (screenHeight * 0.68f)
+	val showRows = !layoutMode.isFullScreenHero
+
+	val scrollState = rememberScrollState()
+
 	BoxWithConstraints(modifier = modifier) {
-		val infoPanelHeight = if (rowsVisible) 440.dp else 520.dp
-		val infoPanelBottomPadding = if (rowsVisible) 0.dp else 64.dp
-
-		Column(Modifier.fillMaxSize()) {
-			// FUSE 2 info panel sits at left=view_side area, top around 200dp.
-			ArcticInfoPanel(
-				modifier = Modifier
+		Column(
+			Modifier
+				.fillMaxSize()
+				.verticalScroll(scrollState),
+		) {
+			Box(
+				Modifier
 					.fillMaxWidth()
-					.padding(start = view_side_dp, top = 200.dp, end = view_pad_dp, bottom = infoPanelBottomPadding)
-					.height(infoPanelHeight),
-				item = hero,
-				featuredCount = featuredCount,
-				heroIndex = heroIndex,
-				onPlay = { hero?.let(onHeroPlay) },
-				onInfo = { hero?.let(onHeroInfo) },
-				onNextFeatured = {
-					if (featuredCount > 0) onHeroIndexChange((heroIndex + 1) % featuredCount)
-				},
-				onPreviousFeatured = {
-					if (featuredCount > 0) onHeroIndexChange((heroIndex - 1 + featuredCount) % featuredCount)
-				},
-				onToggleRows = onToggleRows,
-				onCycleLayoutMode = onCycleLayoutMode,
-				rowsVisible = rowsVisible,
-				layoutMode = layoutMode,
-				initialFocus = initialFocus,
-			)
-
-			if (rowsVisible) {
-				val scrollState = rememberScrollState()
-				Column(
+					.height(heroHeight),
+			) {
+				// FUSE 2 info panel sits at left=view_side area, top around 200dp.
+				ArcticInfoPanel(
 					modifier = Modifier
-						.weight(1f)
-						.verticalScroll(scrollState),
-				) {
-					if (!loaded) {
-						Box(
-							Modifier
-								.fillMaxWidth()
-								.padding(top = 28.dp),
-							contentAlignment = Alignment.Center,
-						) {
-							CircularProgressIndicator(
-								modifier = Modifier.size(40.dp),
-								color = JellyfinTheme.colorScheme.buttonFocused,
-							)
-						}
-					} else {
-						rows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
-						Spacer(Modifier.height(48.dp))
+						.fillMaxWidth()
+						.padding(
+							start = view_side_dp,
+							top = 180.dp,
+							end = view_pad_dp,
+							bottom = if (showRows) 60.dp else 80.dp,
+						)
+						.align(Alignment.BottomStart),
+					item = hero,
+					featuredCount = featuredCount,
+					heroIndex = heroIndex,
+					onPlay = { hero?.let(onHeroPlay) },
+					onInfo = { hero?.let(onHeroInfo) },
+					onNextFeatured = {
+						if (featuredCount > 0) onHeroIndexChange((heroIndex + 1) % featuredCount)
+					},
+					onPreviousFeatured = {
+						if (featuredCount > 0) onHeroIndexChange((heroIndex - 1 + featuredCount) % featuredCount)
+					},
+					onCycleLayoutMode = onCycleLayoutMode,
+					layoutMode = layoutMode,
+					initialFocus = initialFocus,
+				)
+			}
+
+			if (showRows) {
+				if (!loaded) {
+					Box(
+						Modifier
+							.fillMaxWidth()
+							.padding(top = 28.dp),
+						contentAlignment = Alignment.Center,
+					) {
+						CircularProgressIndicator(
+							modifier = Modifier.size(40.dp),
+							color = JellyfinTheme.colorScheme.buttonFocused,
+						)
 					}
+				} else {
+					rows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
+					Spacer(Modifier.height(48.dp))
 				}
 			}
 		}
@@ -552,16 +645,14 @@ private fun ArcticInfoPanel(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
-	onToggleRows: () -> Unit,
 	onCycleLayoutMode: () -> Unit,
-	rowsVisible: Boolean,
 	layoutMode: HomeLayoutMode,
 	initialFocus: FocusRequester,
 	modifier: Modifier = Modifier,
 ) {
 	Column(
 		modifier = modifier,
-		verticalArrangement = Arrangement.SpaceBetween,
+		verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.Bottom),
 	) {
 		Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
 			Text(
@@ -629,7 +720,7 @@ private fun ArcticInfoPanel(
 			horizontalArrangement = Arrangement.spacedBy(12.dp),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			// Play: pressing LEFT on it cycles to previous featured item when at first item it moves to sidebar.
+			// Play: pressing LEFT on it cycles to previous featured item.
 			HeroPlayButton(
 				size = 68.dp,
 				iconSize = 24.dp,
@@ -667,11 +758,7 @@ private fun ArcticInfoPanel(
 
 			Spacer(Modifier.width(8.dp))
 
-			// Temporary toggles until the real settings page is ready.
-			HeroSmallButton(
-				label = if (rowsVisible) "隐" else "显",
-				onClick = onToggleRows,
-			)
+			// Temporary layout-mode switch until the real settings page is ready.
 			HeroSmallButton(
 				label = layoutMode.label.take(2),
 				onClick = onCycleLayoutMode,
