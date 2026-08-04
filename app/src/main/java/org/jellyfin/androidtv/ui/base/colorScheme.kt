@@ -1,8 +1,13 @@
 package org.jellyfin.androidtv.ui.base
 
+import android.graphics.drawable.ColorDrawable
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import org.jellyfin.androidtv.R
 import org.jellyfin.design.Tokens
 
 fun colorScheme(): ColorScheme = ColorScheme(
@@ -37,6 +42,54 @@ fun colorScheme(): ColorScheme = ColorScheme(
 	surface = Tokens.Color.colorBluegrey900,
 	scrim = Tokens.Color.colorBlack.copy(alpha = 0.67f),
 )
+
+/**
+ * Build a [ColorScheme] by reading the current Android theme attributes.
+ * This allows the XML theme (Jellyfin / Netflix / Infuse) to influence
+ * Compose-based UI without hard-coding every color.
+ */
+@Composable
+fun dynamicColorScheme(): ColorScheme {
+	val context = LocalContext.current
+	val theme = context.theme
+
+	return remember(theme) {
+		val attrs = intArrayOf(
+			android.R.attr.colorPrimary,
+			android.R.attr.colorAccent,
+			R.attr.defaultBackground,
+			R.attr.cardViewBackground,
+			R.attr.buttonDefaultHighlightBackground,
+			R.attr.headerTextColor,
+		)
+		val typedArray = theme.obtainStyledAttributes(attrs)
+
+		val colorPrimary = typedArray.getColor(0, 0xFF1C2026.toInt())
+		val colorAccent = typedArray.getColor(1, 0xFF00A4DD.toInt())
+		val defaultBackgroundDrawable = typedArray.getDrawable(2)
+		val cardViewBackground = typedArray.getColor(3, 0)
+		val buttonHighlight = typedArray.getColor(4, colorAccent)
+		val headerText = typedArray.getColor(5, 0xFFF5F5F5.toInt())
+
+		typedArray.recycle()
+
+		val defaultBackground = when (defaultBackgroundDrawable) {
+			is ColorDrawable -> Color(defaultBackgroundDrawable.color.toULong())
+			else -> Tokens.Color.colorGrey975
+		}
+
+		val base = colorScheme()
+		base.copy(
+			background = defaultBackground,
+			surface = if (cardViewBackground == 0) base.surface else Color(cardViewBackground.toULong()),
+			buttonFocused = Color(buttonHighlight.toULong()),
+			rangeControlFill = Color(colorAccent.toULong()),
+			badge = Color(colorAccent.toULong()),
+			listButtonFocused = Color(colorPrimary.toULong()),
+			listHeader = Color(headerText.toULong()),
+		)
+	}
+}
 
 @Immutable
 data class ColorScheme(
