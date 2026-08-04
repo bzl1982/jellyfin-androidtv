@@ -334,7 +334,7 @@ private fun FuseSkinOptionItem(
 					fontSize = 12.sp,
 					fontWeight = FontWeight.Bold,
 				),
-				modifier = modifier.padding(horizontal = 16.dp, top = 16.dp, bottom = 6.dp),
+				modifier = modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 6.dp),
 			)
 		}
 
