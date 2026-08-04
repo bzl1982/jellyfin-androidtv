@@ -1,11 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!-- Infuse 橙主题（Apple TV Infuse 风格暖橙） -->
+    <!-- ============================================================ -->
+    <!-- Infuse 橙主题  v1.1 (2026-08-04) -->
+    <!-- 升级要点: 加 4 个 token (暖琥珀/Hero 遮罩/HDR 标签/品牌锚点) -->
+    <!-- 参考: KODI Arctic Fuse "北极引线" + Apple TV Infuse 设计语言 -->
+    <!-- ============================================================ -->
+
     <color name="theme_infuse_light">#FF6B1A</color>
     <color name="theme_infuse_dark">#1A1A1E</color>
     <color name="theme_infuse_black">#000000</color>
     <color name="theme_infuse_grey">#2C2C30</color>
+
+    <!-- v1.1 新增 token -->
+    <color name="theme_infuse_amber">#FFB74D</color>  <!-- 暖琥珀 (次要强调/焦点态高光) -->
+    <color name="theme_infuse_hero_overlay">#99000000</color>  <!-- Hero 区域左侧文字背景 (60% 黑) -->
+    <color name="theme_infuse_hdr_label_bg">#33FFFFFF</color>  <!-- 4K / HDR 标签背景 (20% 白) -->
+    <color name="theme_infuse_brand_anchor">#FF6B1A</color>  <!-- 右下角 Infuse logo 主色 -->
 
     <style name="Theme.Jellyfin.Infuse" parent="Theme.Jellyfin">
         <item name="android:colorPrimary">@color/theme_infuse_dark</item>
@@ -16,6 +27,12 @@
         <item name="progressPrimary">@color/theme_infuse_light</item>
         <item name="progressSecondary">@color/theme_infuse_dark</item>
         <item name="popupMenuBackground">@color/theme_infuse_black</item>
+
+        <!-- v1.1 新增 token 注入 (供未来 Compose 布局使用) -->
+        <item name="matchGreen">@color/theme_infuse_amber</item>  <!-- Infuse 用暖琥珀替代匹配绿 -->
+        <item name="heroOverlay">@color/theme_infuse_hero_overlay</item>
+        <item name="hdrLabelBg">@color/theme_infuse_hdr_label_bg</item>
+        <item name="brandAnchor">@color/theme_infuse_brand_anchor</item>
 
         <!-- Control icons -->
         <item name="controlIconBackground">@color/theme_infuse_black</item>
