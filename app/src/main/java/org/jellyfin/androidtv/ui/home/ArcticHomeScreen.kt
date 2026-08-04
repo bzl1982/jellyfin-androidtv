@@ -225,7 +225,6 @@ fun ArcticHomeScreen() {
 
 	// Dynamic country × type menu (derived from NFO <country> + genre).
 	var menuCategories by remember { mutableStateOf<List<MenuCategory>>(emptyList()) }
-	var regionCountryMap by remember { mutableStateOf<Map<Region, List<String>>>(emptyMap()) }
 	var selectedCategory by remember { mutableStateOf<MenuCategory?>(null) }
 	var categoryRows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
 	var categoryLoading by remember { mutableStateOf(false) }
@@ -307,9 +306,8 @@ fun ArcticHomeScreen() {
 	LaunchedEffect(Unit) {
 		withContext(Dispatchers.IO) {
 			runCatching {
-				val counts = mutableMapOf<Pair<Region, ProgramType>, Int>()
-				val regionExact = mutableMapOf<Region, MutableSet<String>>()
-				var startIndex = 0
+			val counts = mutableMapOf<Pair<Region, ProgramType>, Int>()
+			var startIndex = 0
 				val pageSize = 500
 				while (true) {
 					val resp = api.itemsApi.getItems(
@@ -327,10 +325,6 @@ fun ArcticHomeScreen() {
 					for (item in items) {
 						val type = classifyType(item) ?: continue
 						val countries = item.productionLocations
-						countries.orEmpty().forEach { c ->
-							val r = classifyRegion(listOf(c))
-							regionExact.getOrPut(r) { mutableSetOf() }.add(c)
-						}
 						val key = classifyRegion(countries) to type
 						counts[key] = (counts[key] ?: 0) + 1
 					}
@@ -340,7 +334,6 @@ fun ArcticHomeScreen() {
 				}
 				withContext(Dispatchers.Main) {
 					menuCategories = buildMenuCategories(counts)
-					regionCountryMap = regionExact.mapValues { it.value.toList() }
 				}
 			}.onFailure { it.printStackTrace() }
 		}
@@ -385,7 +378,6 @@ fun ArcticHomeScreen() {
 							if (resp.items.orEmpty().isEmpty() || start >= (resp.totalRecordCount ?: 0) || size >= 200) break
 						}
 					} else {
-						val countries = regionCountryMap[cat.region].orEmpty()
 						var start = 0
 						while (true) {
 							val resp = api.itemsApi.getItems(
@@ -393,11 +385,11 @@ fun ArcticHomeScreen() {
 								startIndex = start,
 								recursive = true,
 								includeItemTypes = includeTypes,
-								productionLocations = countries,
 								fields = ItemRepository.browseFields,
 								imageTypeLimit = 1,
 							).content
-							val page = resp.items.orEmpty().filter { classifyType(it) == cat.type }
+							val page = resp.items.orEmpty()
+								.filter { classifyType(it) == cat.type && classifyRegion(it.productionLocations) == cat.region }
 							addAll(page)
 							start += resp.items.orEmpty().size
 							if (resp.items.orEmpty().isEmpty() || start >= (resp.totalRecordCount ?: 0) || size >= 200) break
