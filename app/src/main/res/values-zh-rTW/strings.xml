@@ -390,6 +390,13 @@
     <string name="pref_theme_muted_purple">淡紫色</string>
     <string name="pref_theme_netflix">Netflix（黑紅）</string>
     <string name="pref_theme_infuse">Infuse（橙）</string>
+    <!-- v1.1 Hero 布局標籤 -->
+    <string name="lbl_match_score">匹配度 %1$d%%</string>
+    <string name="lbl_hdr">HDR</string>
+    <string name="lbl_4k">4K</string>
+    <string name="lbl_hero_brand_netflix">Netflix</string>
+    <string name="lbl_hero_brand_infuse">Infuse</string>
+    <string name="lbl_popular">本週熱門</string>
     <string name="lbl_switch_user">切換帳號</string>
     <string name="user_picker_last_user_summary">使用最後一個活躍帳號</string>
     <string name="user_picker_last_user_title">最近使用</string>
