@@ -606,7 +606,6 @@ private fun ArcticMainContent(
 			}
 		}
 	}
-}
 
 // endregion
 
