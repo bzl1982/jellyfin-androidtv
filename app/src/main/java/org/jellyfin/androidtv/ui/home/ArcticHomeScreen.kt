@@ -53,11 +53,11 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -270,17 +270,28 @@ fun ArcticHomeScreen() {
 		else -> categoryHeroItems.getOrNull(categoryHeroIndex)
 	}
 
-	Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
+	BoxWithConstraints(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
+		val screenHeight = maxHeight
+
+		// Full-bleed hero backdrop in the top screen area, drawn behind the sidebar
+		// and the main content so the poster extends all the way to the left edge.
+		HeroBackground(
+			item = heroItem,
+			modifier = Modifier
+				.fillMaxWidth()
+				.height(screenHeight)
+				.align(Alignment.TopStart),
+		)
+
 		Row(Modifier.fillMaxSize()) {
 			ArcticSidebar(
 				expanded = sidebarExpanded,
 				onExpandedChange = { sidebarExpanded = it },
 				initialFocus = sidebarFocus,
+				mainContentFocus = mainContentFocus,
 				config = menuConfig,
 				onHome = {
 					selectedCategory = null
-					sidebarExpanded = false
-					runCatching { mainContentFocus.requestFocus() }
 				},
 				onSearch = {
 					sidebarExpanded = false
@@ -292,8 +303,6 @@ fun ArcticHomeScreen() {
 				},
 				onCategory = { cat ->
 					selectedCategory = cat
-					sidebarExpanded = false
-					runCatching { mainContentFocus.requestFocus() }
 					Toast.makeText(context, "正在加载 ${cat.label}", Toast.LENGTH_SHORT).show()
 				},
 			)
@@ -312,6 +321,7 @@ fun ArcticHomeScreen() {
 				categoryLoading = categoryLoading,
 				loaded = loaded,
 				layoutMode = layoutMode,
+				heroHeight = screenHeight,
 				onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
 				onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
 				onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
@@ -332,6 +342,7 @@ private fun ArcticSidebar(
 	expanded: Boolean,
 	onExpandedChange: (Boolean) -> Unit,
 	initialFocus: FocusRequester,
+	mainContentFocus: FocusRequester,
 	config: LorlaMenuConfig,
 	onHome: () -> Unit,
 	onSearch: () -> Unit,
@@ -355,29 +366,43 @@ private fun ArcticSidebar(
 	val anyFocused = statesList.any { it.value }
 	LaunchedEffect(anyFocused) { onExpandedChange(anyFocused) }
 
-	Column(
-		modifier = Modifier
-			.fillMaxHeight()
-			.width(targetWidth)
-			.background(
-				Brush.horizontalGradient(
-					0.00f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.88f else 0.60f),
-					0.70f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.50f else 0.0f),
-					1.00f to Color.Transparent,
-				),
-			)
-			.padding(vertical = 100.dp)
-			.verticalScroll(scrollState),
-		horizontalAlignment = Alignment.CenterHorizontally,
-		verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.Top),
-	) {
+		Column(
+			modifier = Modifier
+				.fillMaxHeight()
+				.width(targetWidth)
+				.background(
+					Brush.horizontalGradient(
+						0.00f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.88f else 0.60f),
+						0.70f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.50f else 0.0f),
+						1.00f to Color.Transparent,
+					),
+				)
+				.padding(vertical = 100.dp)
+				.verticalScroll(scrollState)
+				.onPreviewKeyEvent {
+					if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionRight) {
+						runCatching { mainContentFocus.requestFocus() }
+						true
+					} else {
+						false
+					}
+				},
+			horizontalAlignment = Alignment.CenterHorizontally,
+			verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.Top),
+		) {
 		SidebarItem(
 			icon = R.drawable.ic_house,
 			label = "首页",
 			expanded = expanded,
 			modifier = Modifier.focusRequester(initialFocus),
-			onFocusChange = { statesList[0].value = it },
-			onClick = onHome,
+			onFocusChange = {
+				statesList[0].value = it
+				if (it) onHome()
+			},
+			onClick = {
+				onHome()
+				runCatching { mainContentFocus.requestFocus() }
+			},
 		)
 		SidebarItem(
 			icon = R.drawable.ic_search,
@@ -391,8 +416,14 @@ private fun ArcticSidebar(
 				icon = cat.programType.iconRes(),
 				label = cat.label,
 				expanded = expanded,
-				onFocusChange = { statesList[index + 2].value = it },
-				onClick = { onCategory(cat) },
+				onFocusChange = {
+					statesList[index + 2].value = it
+					if (it) onCategory(cat)
+				},
+				onClick = {
+					onCategory(cat)
+					runCatching { mainContentFocus.requestFocus() }
+				},
 			)
 		}
 		SidebarItem(
@@ -474,6 +505,7 @@ private fun ArcticMainContent(
 	categoryLoading: Boolean,
 	loaded: Boolean,
 	layoutMode: HomeLayoutMode,
+	heroHeight: Dp,
 	onItemClick: (BaseItemDto) -> Unit,
 	onHeroPlay: (BaseItemDto) -> Unit,
 	onHeroInfo: (BaseItemDto) -> Unit,
@@ -483,30 +515,32 @@ private fun ArcticMainContent(
 ) {
 	val scrollState = rememberScrollState()
 
-	BoxWithConstraints(modifier = modifier) {
-		val configuration = LocalConfiguration.current
-		val screenHeight = configuration.screenHeightDp.dp
+	// Whenever the active category changes, snap the scroll back to the top so the
+	// hero and first row are visible instead of leaving the user stuck mid-scroll.
+	LaunchedEffect(selectedCategory) {
+		scrollState.scrollTo(0)
+	}
 
-		Column(
-			Modifier
-				.fillMaxSize()
-				.verticalScroll(scrollState)
-				.onPreviewKeyEvent {
-					if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft) {
-						runCatching { sidebarFocus.requestFocus() }
-						true
-					} else {
-						false
-					}
-				},
-		) {
-			val isHome = selectedCategory == null
-			// Hero is now always full-screen; rows below are revealed only by scrolling.
-			val heroHeight = screenHeight
-			val showRows = when {
-				!isHome -> true
-				else -> !layoutMode.isFullScreenHero
-			}
+	Column(
+		Modifier
+			.fillMaxSize()
+			.then(modifier)
+			.verticalScroll(scrollState)
+			.onPreviewKeyEvent {
+				if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft) {
+					runCatching { sidebarFocus.requestFocus() }
+					true
+				} else {
+					false
+				}
+			},
+	) {
+		val isHome = selectedCategory == null
+		// Hero is now always full-screen; rows below are revealed only by scrolling.
+		val showRows = when {
+			!isHome -> true
+			else -> !layoutMode.isFullScreenHero
+		}
 
 			HeroStage(
 				modifier = Modifier
@@ -529,39 +563,46 @@ private fun ArcticMainContent(
 			)
 
 			if (showRows) {
-				if (!loaded || (selectedCategory != null && categoryLoading)) {
-					Box(
-						Modifier
-							.fillMaxWidth()
-							.padding(top = 28.dp),
-						contentAlignment = Alignment.Center,
-					) {
-						CircularProgressIndicator(
-							modifier = Modifier.size(40.dp),
-							color = JellyfinTheme.colorScheme.buttonFocused,
-						)
-					}
-				} else if (selectedCategory != null) {
-					if (categoryRows.isEmpty()) {
+				// Opaque background so rows cover the full-bleed hero backdrop when scrolled up.
+				Column(
+					modifier = Modifier
+						.fillMaxWidth()
+						.background(JellyfinTheme.colorScheme.background),
+				) {
+					if (!loaded || (selectedCategory != null && categoryLoading)) {
 						Box(
 							Modifier
 								.fillMaxWidth()
 								.padding(top = 28.dp),
 							contentAlignment = Alignment.Center,
 						) {
-							Text(
-								"暂无内容",
-								color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-								style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
+							CircularProgressIndicator(
+								modifier = Modifier.size(40.dp),
+								color = JellyfinTheme.colorScheme.buttonFocused,
 							)
 						}
+					} else if (selectedCategory != null) {
+						if (categoryRows.isEmpty()) {
+							Box(
+								Modifier
+									.fillMaxWidth()
+									.padding(top = 28.dp),
+								contentAlignment = Alignment.Center,
+							) {
+								Text(
+									"暂无内容",
+									color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+									style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
+								)
+							}
+						} else {
+							categoryRows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
+						}
 					} else {
-						categoryRows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
+						homeRows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
 					}
-				} else {
-					homeRows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
+					Spacer(Modifier.height(48.dp))
 				}
-				Spacer(Modifier.height(48.dp))
 			}
 		}
 	}
@@ -585,9 +626,9 @@ private fun HeroStage(
 	onCycleLayoutMode: () -> Unit,
 	initialFocus: FocusRequester,
 ) {
+	// The backdrop is now drawn full-bleed by ArcticHomeScreen behind the sidebar.
+	// This container only holds the info panel so text/buttons scroll with the rows.
 	Box(modifier = modifier) {
-		HeroBackground(item = item, modifier = Modifier.fillMaxSize())
-
 		ArcticInfoPanel(
 			modifier = Modifier
 				.fillMaxWidth()
@@ -644,7 +685,7 @@ private fun HeroBackground(
 						0.45f to Color.Transparent,
 						0.78f to JellyfinTheme.colorScheme.background.copy(alpha = 0.45f),
 						0.92f to JellyfinTheme.colorScheme.background.copy(alpha = 0.72f),
-						1.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.88f),
+						1.00f to JellyfinTheme.colorScheme.background,
 					),
 				),
 		)
@@ -1385,7 +1426,7 @@ private fun LargeLandscapeCard(
 	}
 }
 
-private val view_side_dp = 80.dp
-private val view_pad_dp = 80.dp
+private val view_side_dp = 24.dp
+private val view_pad_dp = 24.dp
 
 // endregion

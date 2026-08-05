@@ -17,10 +17,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -89,17 +87,17 @@ fun FuseSettingsHomeScreen() {
 		Column(
 			modifier = Modifier
 				.fillMaxSize()
-				.padding(start = 64.dp, top = 56.dp, end = 64.dp, bottom = 40.dp),
+				.padding(start = 64.dp, top = 48.dp, end = 64.dp, bottom = 32.dp),
 		) {
 			Text(
 				"设置",
 				color = JellyfinTheme.colorScheme.onBackground,
 				style = JellyfinTheme.typography.default.copy(
-					fontSize = 42.sp,
+					fontSize = 38.sp,
 					fontWeight = FontWeight.ExtraBold,
 					letterSpacing = 0.5.sp,
 				),
-				modifier = Modifier.padding(bottom = 6.dp),
+				modifier = Modifier.padding(bottom = 4.dp),
 			)
 			Text(
 				"个性化你的 LORLA 观影体验",
@@ -108,51 +106,48 @@ fun FuseSettingsHomeScreen() {
 					fontSize = 15.sp,
 					letterSpacing = 0.3.sp,
 				),
-				modifier = Modifier.padding(bottom = 38.dp),
+				modifier = Modifier.padding(bottom = 22.dp),
 			)
 
-				Column(
-					modifier = Modifier
-						.weight(1f)
-						.verticalScroll(rememberScrollState()),
-					verticalArrangement = Arrangement.spacedBy(22.dp),
-				) {
-					cards.chunked(4).forEach { rowCards ->
-						Row(
-							horizontalArrangement = Arrangement.spacedBy(22.dp),
-							modifier = Modifier.fillMaxWidth(),
-						) {
-							rowCards.forEach { card ->
-								FuseSettingsCard(
-									card = card,
-									onClick = {
-										card.route?.let { router.push(it) }
-									},
-									modifier = Modifier.weight(1f),
-								)
-							}
-							// Fill empty slots in the last row so layout stays balanced.
-							repeat(4 - rowCards.size) {
-								Box(modifier = Modifier.weight(1f))
-							}
+			Column(
+				verticalArrangement = Arrangement.spacedBy(14.dp),
+			) {
+				cards.chunked(4).forEach { rowCards ->
+					Row(
+						horizontalArrangement = Arrangement.spacedBy(14.dp),
+						modifier = Modifier.fillMaxWidth(),
+					) {
+						rowCards.forEach { card ->
+							FuseSettingsCard(
+								card = card,
+								onClick = {
+									card.route?.let { router.push(it) }
+								},
+								modifier = Modifier.weight(1f),
+							)
+						}
+						// Fill empty slots in the last row so layout stays balanced.
+						repeat(4 - rowCards.size) {
+							Box(modifier = Modifier.weight(1f))
 						}
 					}
 				}
+			}
 
-				// Secondary tools row — kept out of the main 8 to keep the home tidy,
-				// but still reachable for advanced users.
-				Row(
-					horizontalArrangement = Arrangement.spacedBy(14.dp),
-					verticalAlignment = Alignment.CenterVertically,
-					modifier = Modifier.padding(top = 20.dp),
-				) {
-					SecondaryLink(
-						icon = R.drawable.ic_grid,
-						label = "左侧菜单设置",
-						subtitle = "自定义 20 个分类与子行",
-						onClick = { router.push(Routes.FUSE_SETTINGS_MENU) },
-					)
-				}
+			// Secondary tools row — kept out of the main 8 to keep the home tidy,
+			// but still reachable for advanced users.
+			Row(
+				horizontalArrangement = Arrangement.spacedBy(14.dp),
+				verticalAlignment = Alignment.CenterVertically,
+				modifier = Modifier.padding(top = 16.dp),
+			) {
+				SecondaryLink(
+					icon = R.drawable.ic_grid,
+					label = "左侧菜单设置",
+					subtitle = "自定义 20 个分类与子行",
+					onClick = { router.push(Routes.FUSE_SETTINGS_MENU) },
+				)
+			}
 		}
 	}
 }
@@ -189,7 +184,7 @@ private fun SecondaryLink(
 			)
 			.onFocusChanged { focused = it.hasFocus }
 			.clickable(onClick = onClick)
-			.padding(horizontal = 18.dp, vertical = 14.dp),
+			.padding(horizontal = 16.dp, vertical = 10.dp),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
 		Icon(
@@ -258,7 +253,7 @@ private fun FuseSettingsCard(
 	Column(
 		modifier = modifier
 			.scale(scale)
-			.height(196.dp)
+			.height(138.dp)
 			.background(bgBrush, shape)
 			.border(
 				width = if (focused) 2.dp else 1.dp,
@@ -267,7 +262,7 @@ private fun FuseSettingsCard(
 			)
 			.onFocusChanged { focused = it.hasFocus }
 			.clickable(onClick = onClick)
-			.padding(horizontal = 22.dp, vertical = 22.dp)
+			.padding(horizontal = 18.dp, vertical = 16.dp)
 			.focusGroup(),
 	) {
 		Row(
@@ -278,7 +273,7 @@ private fun FuseSettingsCard(
 			// Icon in colored circle.
 			Box(
 				modifier = Modifier
-					.size(54.dp)
+					.size(44.dp)
 					.background(
 						if (focused) card.accent.copy(alpha = 0.90f)
 						else card.accent.copy(alpha = 0.22f),
@@ -291,13 +286,13 @@ private fun FuseSettingsCard(
 					contentDescription = card.title,
 					tint = if (focused) JellyfinTheme.colorScheme.background
 						else card.accent,
-					modifier = Modifier.size(28.dp),
+					modifier = Modifier.size(24.dp),
 				)
 			}
 			// Chevron hint on focus.
 			Box(
 				modifier = Modifier
-					.size(24.dp)
+					.size(20.dp)
 					.background(
 						if (focused) card.accent.copy(alpha = 0.20f) else Color.Transparent,
 						CircleShape,
@@ -308,7 +303,7 @@ private fun FuseSettingsCard(
 					"›",
 					color = if (focused) card.accent else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.20f),
 					style = JellyfinTheme.typography.default.copy(
-						fontSize = 22.sp,
+						fontSize = 18.sp,
 						fontWeight = FontWeight.Bold,
 					),
 				)
@@ -321,20 +316,20 @@ private fun FuseSettingsCard(
 			card.title,
 			color = JellyfinTheme.colorScheme.onBackground,
 			style = JellyfinTheme.typography.default.copy(
-				fontSize = 22.sp,
+				fontSize = 18.sp,
 				fontWeight = FontWeight.Bold,
 				letterSpacing = 0.2.sp,
 			),
 			maxLines = 1,
 			overflow = TextOverflow.Ellipsis,
 		)
-		Spacer(modifier = Modifier.height(4.dp))
+		Spacer(modifier = Modifier.height(2.dp))
 		Text(
 			card.subtitle,
 			color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f),
 			style = JellyfinTheme.typography.default.copy(
-				fontSize = 13.sp,
-				lineHeight = 18.sp,
+				fontSize = 12.sp,
+				lineHeight = 16.sp,
 				letterSpacing = 0.2.sp,
 			),
 			maxLines = 2,
