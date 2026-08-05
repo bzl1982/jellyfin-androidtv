@@ -272,6 +272,9 @@ fun ArcticHomeScreen() {
 
 	BoxWithConstraints(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
 		val screenHeight = maxHeight
+		// Pinned hero occupies the top band; the poster still reaches the left screen
+		// edge because the backdrop is drawn full-width behind the sidebar.
+		val heroHeight = screenHeight * 0.62f
 
 		// Full-bleed hero backdrop in the top screen area, drawn behind the sidebar
 		// and the main content so the poster extends all the way to the left edge.
@@ -279,7 +282,7 @@ fun ArcticHomeScreen() {
 			item = heroItem,
 			modifier = Modifier
 				.fillMaxWidth()
-				.height(screenHeight)
+				.height(heroHeight)
 				.align(Alignment.TopStart),
 		)
 
@@ -320,8 +323,8 @@ fun ArcticHomeScreen() {
 				categoryRows = categoryRows,
 				categoryLoading = categoryLoading,
 				loaded = loaded,
-				layoutMode = layoutMode,
-				heroHeight = screenHeight,
+			layoutMode = layoutMode,
+			heroHeight = heroHeight,
 				onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
 				onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
 				onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
@@ -513,30 +516,21 @@ private fun ArcticMainContent(
 	initialFocus: FocusRequester,
 	sidebarFocus: FocusRequester,
 ) {
-	val scrollState = rememberScrollState()
+	val rowsScrollState = rememberScrollState()
 
-	// Whenever the active category changes, snap the scroll back to the top so the
-	// hero and first row are visible instead of leaving the user stuck mid-scroll.
+	// Whenever the active category changes, snap the rows scroll back to the top.
 	LaunchedEffect(selectedCategory) {
-		scrollState.scrollTo(0)
+		rowsScrollState.scrollTo(0)
 	}
 
 	Column(
 		Modifier
 			.fillMaxSize()
-			.then(modifier)
-			.verticalScroll(scrollState)
-			.onPreviewKeyEvent {
-				if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft) {
-					runCatching { sidebarFocus.requestFocus() }
-					true
-				} else {
-					false
-				}
-			},
+			.then(modifier),
 	) {
 		val isHome = selectedCategory == null
-		// Hero is now always full-screen; rows below are revealed only by scrolling.
+		// Pinned hero: it stays put (and keeps rotating) while the rows below scroll
+		// independently, so the big stage never overlaps the posters.
 		val showRows = when {
 			!isHome -> true
 			else -> !layoutMode.isFullScreenHero
@@ -562,48 +556,70 @@ private fun ArcticMainContent(
 				initialFocus = initialFocus,
 			)
 
-			if (showRows) {
-				// Opaque background so rows cover the full-bleed hero backdrop when scrolled up.
-				Column(
-					modifier = Modifier
-						.fillMaxWidth()
-						.background(JellyfinTheme.colorScheme.background),
-				) {
-					if (!loaded || (selectedCategory != null && categoryLoading)) {
-						Box(
-							Modifier
-								.fillMaxWidth()
-								.padding(top = 28.dp),
-							contentAlignment = Alignment.Center,
-						) {
-							CircularProgressIndicator(
-								modifier = Modifier.size(40.dp),
-								color = JellyfinTheme.colorScheme.buttonFocused,
-							)
-						}
-					} else if (selectedCategory != null) {
-						if (categoryRows.isEmpty()) {
-							Box(
-								Modifier
-									.fillMaxWidth()
-									.padding(top = 28.dp),
-								contentAlignment = Alignment.Center,
-							) {
-								Text(
-									"暂无内容",
-									color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-									style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
-								)
-							}
-						} else {
-							categoryRows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
-						}
+		// Rows live in their own scroll area pinned below the hero. The opaque
+		// background and the separate scroll guarantee the rotating hero backdrop
+		// is never visible behind or overlapping the posters.
+		Column(
+			Modifier
+				.fillMaxWidth()
+				.fillMaxHeight()
+				.background(JellyfinTheme.colorScheme.background)
+				.verticalScroll(rowsScrollState)
+				.onPreviewKeyEvent {
+					if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft) {
+						runCatching { sidebarFocus.requestFocus() }
+						true
 					} else {
-						homeRows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
+						false
 					}
-					Spacer(Modifier.height(48.dp))
+				},
+		) {
+			// Soft fade so the first row emerges from the hero instead of a hard edge.
+			Box(
+				Modifier
+					.fillMaxWidth()
+					.height(40.dp)
+					.background(
+						Brush.verticalGradient(
+							0.00f to JellyfinTheme.colorScheme.background,
+							1.00f to Color.Transparent,
+						),
+					),
+			)
+
+			if (showRows) {
+				if (!loaded || (selectedCategory != null && categoryLoading)) {
+					Box(
+						Modifier
+							.fillMaxWidth()
+							.padding(top = 12.dp),
+						contentAlignment = Alignment.Center,
+					) {
+						CircularProgressIndicator(
+							modifier = Modifier.size(40.dp),
+							color = JellyfinTheme.colorScheme.buttonFocused,
+						)
+					}
+				} else if (selectedCategory != null && categoryRows.isEmpty()) {
+					Box(
+						Modifier
+							.fillMaxWidth()
+							.padding(top = 12.dp),
+						contentAlignment = Alignment.Center,
+					) {
+						Text(
+							"暂无内容",
+							color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+							style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
+						)
+					}
+				} else {
+					val rows = if (selectedCategory != null) categoryRows else homeRows
+					rows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
 				}
 			}
+			Spacer(Modifier.height(48.dp))
+		}
 		}
 	}
 
@@ -1000,11 +1016,11 @@ private fun ArcticRowView(
 	Column(
 		Modifier
 			.fillMaxWidth()
-			.padding(top = 22.dp, bottom = 6.dp),
+			.padding(top = 18.dp, bottom = 6.dp),
 	) {
 		Row(
 			verticalAlignment = Alignment.CenterVertically,
-			modifier = Modifier.padding(end = 36.dp, bottom = 12.dp),
+			modifier = Modifier.padding(start = 36.dp, end = 36.dp, bottom = 12.dp),
 		) {
 			Box(
 				Modifier
@@ -1024,7 +1040,7 @@ private fun ArcticRowView(
 		}
 
 		LazyRow(
-			contentPadding = PaddingValues(end = 36.dp),
+			contentPadding = PaddingValues(start = 36.dp, end = 36.dp),
 			horizontalArrangement = Arrangement.spacedBy(16.dp),
 		) {
 			items(items, key = { it.id }) { item ->
