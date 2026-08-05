@@ -39,7 +39,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -314,6 +313,7 @@ fun ArcticHomeScreen() {
 				onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
 				onCycleLayoutMode = { layoutMode = HomeLayoutMode.entries[(layoutMode.ordinal + 1) % HomeLayoutMode.entries.size] },
 				initialFocus = mainContentFocus,
+				sidebarFocus = sidebarFocus,
 			)
 		}
 	}
@@ -475,6 +475,7 @@ private fun ArcticMainContent(
 	onHeroInfo: (BaseItemDto) -> Unit,
 	onCycleLayoutMode: () -> Unit,
 	initialFocus: FocusRequester,
+	sidebarFocus: FocusRequester,
 ) {
 	val scrollState = rememberScrollState()
 
@@ -482,10 +483,26 @@ private fun ArcticMainContent(
 		val configuration = LocalConfiguration.current
 		val screenHeight = configuration.screenHeightDp.dp
 
+		// When the user navigates into the hero info / play row, ensure the full hero
+		// is visible rather than letting it be clipped to the top of the viewport.
+		val scrollToTop: suspend () -> Unit = {
+			if (scrollState.value > 0) {
+				scrollState.animateScrollTo(0)
+			}
+		}
+
 		Column(
 			Modifier
 				.fillMaxSize()
-				.verticalScroll(scrollState),
+				.verticalScroll(scrollState)
+				.onPreviewKeyEvent {
+					if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft) {
+						runCatching { sidebarFocus.requestFocus() }
+						true
+					} else {
+						false
+					}
+				},
 		) {
 			val isHome = selectedCategory == null
 			val heroHeight = when {
@@ -516,6 +533,7 @@ private fun ArcticMainContent(
 				},
 				onCycleLayoutMode = onCycleLayoutMode,
 				initialFocus = initialFocus,
+				onFocusBringIntoView = scrollToTop,
 			)
 
 			if (showRows) {
@@ -574,6 +592,7 @@ private fun HeroStage(
 	onPreviousFeatured: () -> Unit,
 	onCycleLayoutMode: () -> Unit,
 	initialFocus: FocusRequester,
+	onFocusBringIntoView: suspend () -> Unit = {},
 ) {
 	Box(modifier = modifier) {
 		HeroBackground(item = item, modifier = Modifier.fillMaxSize())
@@ -585,7 +604,7 @@ private fun HeroStage(
 					start = view_side_dp,
 					top = 160.dp,
 					end = view_pad_dp,
-					bottom = if (layoutMode.isFullScreenHero) 100.dp else 48.dp,
+					bottom = if (layoutMode.isFullScreenHero) 100.dp else 56.dp,
 				)
 				.align(Alignment.BottomStart),
 			item = item,
@@ -598,6 +617,7 @@ private fun HeroStage(
 			onCycleLayoutMode = onCycleLayoutMode,
 			layoutMode = layoutMode,
 			initialFocus = initialFocus,
+			onFocusBringIntoView = onFocusBringIntoView,
 		)
 	}
 }
@@ -623,6 +643,7 @@ private fun HeroBackground(
 			Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background))
 		}
 
+		// Left-to-right darken: keep right side of poster visible, darken left for info text.
 		Box(
 			Modifier
 				.fillMaxSize()
@@ -637,15 +658,33 @@ private fun HeroBackground(
 				),
 		)
 
+		// Top soft fade for status bar legibility — covers top ~18%.
 		Box(
 			Modifier
-				.fillMaxSize()
+				.fillMaxWidth()
+				.align(Alignment.TopCenter)
+				.fillMaxHeight(0.22f)
+				.background(
+					Brush.verticalGradient(
+						0.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.55f),
+						1.00f to Color.Transparent,
+					),
+				),
+		)
+
+		// Bottom hard mask: a solid color band starting at the bottom of the hero area,
+		// aligned to the poster's bottom edge so poster rows below are not overlapped.
+		Box(
+			Modifier
+				.fillMaxWidth()
+				.align(Alignment.BottomCenter)
+				.fillMaxHeight(0.42f)
 				.background(
 					Brush.verticalGradient(
 						0.00f to Color.Transparent,
-						0.35f to Color.Transparent,
-						0.72f to JellyfinTheme.colorScheme.background.copy(alpha = 0.80f),
-						1.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.98f),
+						0.35f to JellyfinTheme.colorScheme.background.copy(alpha = 0.55f),
+						0.80f to JellyfinTheme.colorScheme.background.copy(alpha = 0.92f),
+						1.00f to JellyfinTheme.colorScheme.background,
 					),
 				),
 		)
@@ -664,10 +703,19 @@ private fun ArcticInfoPanel(
 	onCycleLayoutMode: () -> Unit,
 	layoutMode: HomeLayoutMode,
 	initialFocus: FocusRequester,
+	onFocusBringIntoView: suspend () -> Unit = {},
 	modifier: Modifier = Modifier,
 ) {
+	var anyChildFocused by remember { mutableStateOf(false) }
+	LaunchedEffect(anyChildFocused) {
+		if (anyChildFocused) onFocusBringIntoView()
+	}
+
 	Column(
-		modifier = modifier,
+		modifier = modifier
+			.onFocusChanged { state ->
+				anyChildFocused = state.isFocused
+			},
 		verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.Bottom),
 	) {
 		Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -724,19 +772,19 @@ private fun ArcticInfoPanel(
 		}
 
 		Row(
-			horizontalArrangement = Arrangement.spacedBy(12.dp),
+			horizontalArrangement = Arrangement.spacedBy(14.dp),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
 			HeroPlayButton(
-				size = 68.dp,
-				iconSize = 24.dp,
+				size = 60.dp,
+				iconSize = 22.dp,
 				onClick = onPlay,
 				onLeft = onPreviousFeatured,
 				focusRequester = initialFocus,
 			)
 
 			HeroInfoButton(
-				size = 54.dp,
+				size = 60.dp,
 				iconSize = 20.dp,
 				onClick = onInfo,
 				onRight = onNextFeatured,
@@ -745,12 +793,12 @@ private fun ArcticInfoPanel(
 			if (featuredCount > 1) {
 				Row(
 					horizontalArrangement = Arrangement.spacedBy(6.dp),
-					modifier = Modifier.padding(start = 18.dp),
+					modifier = Modifier.padding(start = 20.dp),
 				) {
 					repeat(featuredCount) { i ->
 						Box(
 							Modifier
-								.size(width = if (i == heroIndex) 20.dp else 6.dp, height = 6.dp)
+								.size(width = if (i == heroIndex) 22.dp else 6.dp, height = 6.dp)
 								.background(
 									if (i == heroIndex) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.35f),
 									RoundedCornerShape(3.dp),
@@ -760,7 +808,7 @@ private fun ArcticInfoPanel(
 				}
 			}
 
-			Spacer(Modifier.width(8.dp))
+			Spacer(Modifier.width(10.dp))
 
 			HeroSmallButton(
 				label = layoutMode.label.take(2),
@@ -784,14 +832,13 @@ private fun HeroPlayButton(
 		modifier = Modifier
 			.then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
 			.size(size)
-			.scale(if (focused) 1.08f else 1f)
 			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.50f),
+				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.55f),
 				CircleShape,
 			)
 			.border(
-				width = if (focused) 0.dp else 1.dp,
-				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.22f),
+				width = if (focused) 2.dp else 1.dp,
+				color = if (focused) Color.Transparent else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.28f),
 				shape = CircleShape,
 			)
 			.onFocusChanged { focused = it.hasFocus }
@@ -827,14 +874,13 @@ private fun HeroInfoButton(
 	Box(
 		modifier = Modifier
 			.size(size)
-			.scale(if (focused) 1.08f else 1f)
 			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.50f),
+				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.55f),
 				CircleShape,
 			)
 			.border(
-				width = if (focused) 0.dp else 1.dp,
-				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.22f),
+				width = if (focused) 2.dp else 1.dp,
+				color = if (focused) Color.Transparent else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.28f),
 				shape = CircleShape,
 			)
 			.onFocusChanged { focused = it.hasFocus }
@@ -867,16 +913,15 @@ private fun HeroSmallButton(
 
 	Box(
 		modifier = Modifier
-			.height(34.dp)
-			.width(46.dp)
-			.scale(if (focused) 1.06f else 1f)
+			.height(36.dp)
+			.width(54.dp)
 			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.40f),
+				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.45f),
 				RoundedCornerShape(8.dp),
 			)
 			.border(
-				width = if (focused) 0.dp else 1.dp,
-				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.20f),
+				width = if (focused) 2.dp else 1.dp,
+				color = if (focused) Color.Transparent else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.28f),
 				shape = RoundedCornerShape(8.dp),
 			)
 			.onFocusChanged { focused = it.hasFocus }
