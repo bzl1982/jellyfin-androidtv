@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.jellyfin.androidtv.BuildConfig
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.form.RadioButton
@@ -248,11 +249,11 @@ fun FuseSkinSettingsScreen() {
 								fontWeight = FontWeight.Bold,
 							),
 						)
-						Text(
-							"Kodi 21.0 (21.0.0) Git:20240406-60c4500054",
-							color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-							style = JellyfinTheme.typography.default.copy(fontSize = 13.sp),
-						)
+					Text(
+						"jellyfin-androidtv ${BuildConfig.VERSION_NAME} ${BuildConfig.BUILD_TYPE}",
+						color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+						style = JellyfinTheme.typography.default.copy(fontSize = 13.sp),
+					)
 					}
 				}
 			}

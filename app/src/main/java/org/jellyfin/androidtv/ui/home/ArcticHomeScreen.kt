@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -31,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -49,8 +51,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,11 +60,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
-import org.jellyfin.androidtv.data.repository.ItemRepository
-import org.jellyfin.androidtv.data.repository.UserViewsRepository
 import org.jellyfin.androidtv.ui.base.CircularProgressIndicator
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
@@ -76,15 +75,11 @@ import org.jellyfin.androidtv.util.apiclient.itemBackdropImages
 import org.jellyfin.androidtv.util.apiclient.itemImages
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.itemsApi
-import org.jellyfin.sdk.api.client.extensions.tvShowsApi
-import org.jellyfin.sdk.api.client.extensions.userLibraryApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
-import org.jellyfin.sdk.model.api.CollectionType
-import org.jellyfin.sdk.model.api.ItemSortBy
-import org.jellyfin.sdk.model.api.MediaType
-import org.jellyfin.sdk.model.api.SortOrder
 import org.jellyfin.sdk.model.api.ItemFields
+import org.jellyfin.sdk.model.api.ItemSortBy
+import org.jellyfin.sdk.model.api.SortOrder
 import org.koin.compose.koinInject
 
 // region Data model
@@ -94,105 +89,24 @@ data class ArcticRow(
 	val items: List<BaseItemDto>,
 )
 
-// Region buckets derived from each title's NFO <country> field.
-// 华语(大陆/港台) / 日韩 / 欧美 / 其它 — never one menu per country.
-private enum class Region(val label: String) {
-	MAINLAND("大陆"),
-	HKTW("港台"),
-	JPKR("日韩"),
-	WEST("欧美"),
-	OTHER("其它"),
-}
-
-// Program types: a movie is Movie; a series is split by genre into
-// 剧集 / 综艺 / 动漫 / 纪录片.
-private enum class ProgramType(val label: String) {
-	MOVIE("电影"),
-	SERIES("剧集"),
-	VARIETY("综艺"),
-	ANIME("动漫"),
-	DOC("纪录片"),
-}
-
-private fun classifyRegion(countries: List<String>?): Region {
-	if (countries.isNullOrEmpty()) return Region.OTHER
-	for (raw in countries) {
-		val s = raw.lowercase().trim()
-		if (s.contains("中国") || s.contains("大陆") || s.contains("china") || s == "cn") return Region.MAINLAND
-		if (s.contains("香港") || s.contains("台湾") || s.contains("臺灣") ||
-			s.contains("hong kong") || s.contains("taiwan") ||
-			s.contains("macao") || s.contains("澳门") || s.contains("hongkong")) return Region.HKTW
-		if (s.contains("日本") || s.contains("japan") || s.contains("韩国") || s.contains("韓國") || s.contains("korea")) return Region.JPKR
-		if (s.contains("美国") || s.contains("united states") || s.contains("usa") || s == "us" ||
-			s.contains("英国") || s.contains("uk") || s.contains("britain") ||
-			s.contains("法国") || s.contains("france") ||
-			s.contains("德国") || s.contains("germany") ||
-			s.contains("意大利") || s.contains("italy") ||
-			s.contains("西班牙") || s.contains("spain") ||
-			s.contains("加拿大") || s.contains("canada") ||
-			s.contains("澳大利亚") || s.contains("australia") ||
-			s.contains("俄罗斯") || s.contains("russia") ||
-			s.contains("新西兰") || s.contains("zealand") ||
-			s.contains("荷兰") || s.contains("netherlands") || s.contains("holland") ||
-			s.contains("葡萄牙") || s.contains("portugal") ||
-			s.contains("瑞典") || s.contains("sweden") ||
-			s.contains("丹麦") || s.contains("denmark") ||
-			s.contains("挪威") || s.contains("norway") ||
-			s.contains("比利时") || s.contains("belgium") ||
-			s.contains("奥地利") || s.contains("austria") ||
-			s.contains("爱尔兰") || s.contains("ireland") ||
-			s.contains("波兰") || s.contains("poland") ||
-			s.contains("巴西") || s.contains("brazil") ||
-			s.contains("墨西哥") || s.contains("mexico") ||
-			s.contains("阿根廷") || s.contains("argentina") ||
-			s.contains("瑞士") || s.contains("switzerland") ||
-			s.contains("土耳其") || s.contains("turkey") ||
-			s.contains("希腊") || s.contains("greece") ||
-			s.contains("捷克") || s.contains("czech")) return Region.WEST
-		// Romanised (pure-latin) country names default to 欧美.
-		if (s.all { it.isLetter() && it.code < 128 }) return Region.WEST
-	}
-	return Region.OTHER
-}
-
-private fun classifyType(item: BaseItemDto): ProgramType? {
-	return when (item.type) {
-		BaseItemKind.MOVIE -> ProgramType.MOVIE
-		BaseItemKind.SERIES -> {
-			val g = item.genres.orEmpty().map { it.lowercase() }
-			when {
-				g.any { it.contains("综艺") || it.contains("variety") || it.contains("show") || it.contains("talk") } -> ProgramType.VARIETY
-				g.any { it.contains("动漫") || it.contains("anime") || it.contains("动画") } -> ProgramType.ANIME
-				g.any { it.contains("纪录") || it.contains("documentary") } -> ProgramType.DOC
-				else -> ProgramType.SERIES
-			}
-		}
-		else -> null
-	}
-}
-
-private data class MenuCategory(
-	val id: String,
-	val label: String,
-	val region: Region,
-	val type: ProgramType,
-	val isOther: Boolean,
-	val count: Int,
-	val icon: Int,
+private data class ClassifiedItem(
+	val item: BaseItemDto,
+	val programType: ProgramType,
+	val bucket: RegionBucket,
+	val subRowId: String?,
 )
 
 /**
  * Six home layout modes translated from the FUSE 2 reference screenshots.
- * Mode 0 is the existing portrait-poster look; modes 1-5 replicate the 5 screenshots.
- * LARGE_LANDSCAPE is the full-screen hero mode and hides the rows below it.
+ * Mode 5 (LARGE_LANDSCAPE) is the full-screen hero mode and hides the rows below it.
  */
 private enum class HomeLayoutMode {
-	PORTRAIT_POSTERS,   // 竖版海报
-	WIDE_INFO_CARDS,    // 宽信息卡
-	LANDSCAPE_CARDS,    // 横向海报
-	CIRCULAR_DISCS,     // 圆形光盘
-	PORTRAIT_WITH_BAR,  // 竖版+信息栏
-	LARGE_LANDSCAPE,    // 大海报
+	PORTRAIT_POSTERS,
+	WIDE_INFO_CARDS,
+	LANDSCAPE_CARDS,
+	CIRCULAR_DISCS,
+	PORTRAIT_WITH_BAR,
+	LARGE_LANDSCAPE,
 }
 
 private val HomeLayoutMode.label: String
@@ -214,100 +128,34 @@ private val HomeLayoutMode.isFullScreenHero: Boolean
 fun ArcticHomeScreen() {
 	val context = LocalContext.current
 	val api = koinInject<ApiClient>()
-	val userViewsRepository = koinInject<UserViewsRepository>()
 	val navigationRepository = koinInject<NavigationRepository>()
+	val menuStore = remember { MenuConfigurationStore(context) }
 
-	var libraries by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
+	var menuConfig by remember { mutableStateOf(menuStore.load()) }
+	var allItems by remember { mutableStateOf<List<ClassifiedItem>>(emptyList()) }
 	var featuredItems by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
-	var heroIndex by remember { mutableStateOf(0) }
-	var rows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
+	var homeRows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
 	var loaded by remember { mutableStateOf(false) }
 
-	// Dynamic country × type menu (derived from NFO <country> + genre).
-	var menuCategories by remember { mutableStateOf<List<MenuCategory>>(emptyList()) }
-	var selectedCategory by remember { mutableStateOf<MenuCategory?>(null) }
+	var selectedCategory by remember { mutableStateOf<CategoryMenuConfig?>(null) }
+	var categoryHeroItems by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
 	var categoryRows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
 	var categoryLoading by remember { mutableStateOf(false) }
 
 	var layoutMode by remember { mutableStateOf(HomeLayoutMode.PORTRAIT_POSTERS) }
+	var homeHeroIndex by remember { mutableIntStateOf(0) }
+	var categoryHeroIndex by remember { mutableIntStateOf(0) }
 	var sidebarExpanded by remember { mutableStateOf(false) }
 
 	val sidebarFocus = remember { FocusRequester() }
 	val mainContentFocus = remember { FocusRequester() }
 
-	LaunchedEffect(Unit) {
-		withContext(Dispatchers.IO) {
-		runCatching {
-			val views = userViewsRepository.views.first()
-				.filter { it.collectionType !in setOf(CollectionType.PLAYLISTS, CollectionType.LIVETV) }
-
-			val resume = api.itemsApi.getResumeItems(
-				fields = ItemRepository.browseFields,
-				imageTypeLimit = 1,
-				limit = 20,
-				mediaTypes = listOf(MediaType.VIDEO),
-				includeItemTypes = listOf(BaseItemKind.MOVIE, BaseItemKind.EPISODE),
-				excludeActiveSessions = true,
-			).content.items.orEmpty()
-
-			val nextUp = api.tvShowsApi.getNextUp(
-				imageTypeLimit = 1,
-				limit = 20,
-				enableResumable = false,
-				fields = ItemRepository.browseFields,
-			).content.items.orEmpty()
-
-			val recentlyAdded = api.itemsApi.getItems(
-				limit = 24,
-				recursive = true,
-				includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
-				sortBy = setOf(ItemSortBy.DATE_CREATED),
-				sortOrder = setOf(SortOrder.DESCENDING),
-				fields = ItemRepository.browseFields,
-				imageTypeLimit = 1,
-			).content.items.orEmpty()
-
-			val perLibrary = views.mapNotNull { view ->
-				val items = api.userLibraryApi.getLatestMedia(
-					parentId = view.id,
-					limit = 20,
-					fields = ItemRepository.browseFields,
-					imageTypeLimit = 1,
-					groupItems = true,
-				).content
-				if (items.isNullOrEmpty()) null else ArcticRow(view.name ?: "", items)
-			}
-
-			val featureCandidates = buildList {
-				addAll(resume)
-				addAll(nextUp)
-				addAll(recentlyAdded)
-				perLibrary.forEach { addAll(it.items.take(2)) }
-			}.distinctBy { it.id }.take(12)
-
-			val rowList = buildList {
-				if (resume.isNotEmpty()) add(ArcticRow("继续观看", resume))
-				if (nextUp.isNotEmpty()) add(ArcticRow("接下来播放", nextUp))
-				if (recentlyAdded.isNotEmpty()) add(ArcticRow("最近添加", recentlyAdded))
-				addAll(perLibrary)
-			}
-
-			withContext(Dispatchers.Main) {
-				libraries = views
-				featuredItems = featureCandidates
-				rows = rowList
-				loaded = true
-			}
-		}.onFailure { it.printStackTrace() }
-		}
-	}
-
-	// ---- Build the country × type menu by aggregating every Movie/Series item ----
+	// ---- Load and classify every Movie/Series item once ----
 	LaunchedEffect(Unit) {
 		withContext(Dispatchers.IO) {
 			runCatching {
-			val counts = mutableMapOf<Pair<Region, ProgramType>, Int>()
-			var startIndex = 0
+				val classified = mutableListOf<ClassifiedItem>()
+				var startIndex = 0
 				val pageSize = 500
 				while (true) {
 					val resp = api.itemsApi.getItems(
@@ -318,123 +166,115 @@ fun ArcticHomeScreen() {
 						fields = setOf(
 							ItemFields.PRODUCTION_LOCATIONS,
 							ItemFields.GENRES,
+							ItemFields.OVERVIEW,
+							ItemFields.DATE_CREATED,
+							ItemFields.COMMUNITY_RATING,
 							ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
 						),
+						sortBy = setOf(ItemSortBy.DATE_CREATED),
+						sortOrder = setOf(SortOrder.DESCENDING),
 					).content
 					val items = resp.items.orEmpty()
 					for (item in items) {
-						val type = classifyType(item) ?: continue
-						val countries = item.productionLocations
-						val key = classifyRegion(countries) to type
-						counts[key] = (counts[key] ?: 0) + 1
+						val programType = MenuDefaults.classifyProgramType(item) ?: continue
+						val bucket = MenuDefaults.classifyBucket(item.productionLocations)
+						val subRowId = item.productionLocations.orEmpty()
+							.mapNotNull { MenuDefaults.countrySubRowId(bucket, it) }
+							.firstOrNull()
+						classified.add(ClassifiedItem(item, programType, bucket, subRowId))
 					}
 					val total = resp.totalRecordCount ?: 0
 					startIndex += items.size
 					if (items.isEmpty() || startIndex >= total) break
 				}
+
+				// Featured stage: up to 12 newest items with an image.
+				val featured = classified
+					.map { it.item }
+					.filter { it.itemBackdropImages.isNotEmpty() || it.itemImages.isNotEmpty() }
+					.distinctBy { it.id }
+					.take(12)
+
+				// Home rows: one row per program type, newest first.
+				val typeRows = ProgramType.entries.mapNotNull { type ->
+					val items = classified
+						.filter { it.programType == type }
+						.map { it.item }
+						.take(30)
+					if (items.isEmpty()) null else ArcticRow(type.label, items)
+				}
+
 				withContext(Dispatchers.Main) {
-					menuCategories = buildMenuCategories(counts)
+					allItems = classified
+					featuredItems = featured
+					homeRows = typeRows
+					loaded = true
 				}
 			}.onFailure { it.printStackTrace() }
 		}
 	}
 
-	// ---- Load items for the selected country × type category ----
-	LaunchedEffect(selectedCategory) {
+	// ---- Build category view rows whenever selection or data changes ----
+	LaunchedEffect(selectedCategory, allItems) {
 		val cat = selectedCategory
-		if (cat == null) {
+		if (cat == null || allItems.isEmpty()) {
+			categoryHeroItems = emptyList()
 			categoryRows = emptyList()
 			return@LaunchedEffect
 		}
 		categoryLoading = true
-		withContext(Dispatchers.IO) {
-			runCatching {
-				val includeTypes = if (cat.type == ProgramType.MOVIE) {
-					setOf(BaseItemKind.MOVIE)
-				} else {
-					setOf(BaseItemKind.SERIES)
-				}
-				val items = buildList {
-					if (cat.isOther) {
-						// Catch-all: every item of this type except the explicitly-shown regions.
-						val shownRegions = menuCategories
-							.filter { !it.isOther && it.type == cat.type }
-							.map { it.region }
-							.toSet()
-						var start = 0
-						while (true) {
-							val resp = api.itemsApi.getItems(
-								limit = 200,
-								startIndex = start,
-								recursive = true,
-								includeItemTypes = includeTypes,
-								fields = ItemRepository.browseFields,
-								imageTypeLimit = 1,
-							).content
-							val page = resp.items.orEmpty()
-								.filter { classifyType(it) == cat.type && classifyRegion(it.productionLocations) !in shownRegions }
-							addAll(page)
-							start += resp.items.orEmpty().size
-							if (resp.items.orEmpty().isEmpty() || start >= (resp.totalRecordCount ?: 0) || size >= 200) break
-						}
-					} else {
-						var start = 0
-						while (true) {
-							val resp = api.itemsApi.getItems(
-								limit = 200,
-								startIndex = start,
-								recursive = true,
-								includeItemTypes = includeTypes,
-								fields = ItemRepository.browseFields,
-								imageTypeLimit = 1,
-							).content
-							val page = resp.items.orEmpty()
-								.filter { classifyType(it) == cat.type && classifyRegion(it.productionLocations) == cat.region }
-							addAll(page)
-							start += resp.items.orEmpty().size
-							if (resp.items.orEmpty().isEmpty() || start >= (resp.totalRecordCount ?: 0) || size >= 200) break
-						}
+		categoryHeroIndex = 0
+		withContext(Dispatchers.Default) {
+			val matching = allItems.filter { it.programType == cat.programType && it.bucket == cat.regionBucket }
+			val heroItems = matching.map { it.item }.distinctBy { it.id }
+			val rows = buildList {
+				// Visible sub-rows in configured order.
+				cat.subRows.filter { it.visible }.sortedBy { it.order }.forEach { sub ->
+					val subItems = matching
+						.filter { it.subRowId == sub.id }
+						.map { it.item }
+						.distinctBy { it.id }
+					if (subItems.isNotEmpty()) {
+						add(ArcticRow(sub.label, subItems))
 					}
 				}
-				val chunked = items.chunked(14).map { ArcticRow(cat.label, it) }
-				withContext(Dispatchers.Main) {
-					categoryRows = chunked
-					categoryLoading = false
+				// Fallback: if no sub-rows matched (e.g. OTHER bucket), chunk everything.
+				if (isEmpty() && heroItems.isNotEmpty()) {
+					heroItems.chunked(14).forEach { add(ArcticRow(cat.label, it)) }
 				}
-			}.onFailure {
-				it.printStackTrace()
+			}
+			withContext(Dispatchers.Main) {
+				categoryHeroItems = heroItems
+				categoryRows = rows
 				categoryLoading = false
 			}
 		}
 	}
 
-	// Auto-rotate the featured stage every 8s when on home and not interacting.
-	LaunchedEffect(heroIndex, featuredItems.size, selectedCategory) {
-		if (selectedCategory != null || featuredItems.size <= 1) return@LaunchedEffect
+	// Auto-rotate the hero every 8s.
+	val activeHeroCount = if (selectedCategory == null) featuredItems.size else categoryHeroItems.size
+	LaunchedEffect(homeHeroIndex, categoryHeroIndex, selectedCategory, activeHeroCount) {
+		if (activeHeroCount <= 1) return@LaunchedEffect
 		delay(8_000)
-		heroIndex = (heroIndex + 1) % featuredItems.size
+		if (selectedCategory == null) {
+			homeHeroIndex = (homeHeroIndex + 1) % activeHeroCount
+		} else {
+			categoryHeroIndex = (categoryHeroIndex + 1) % activeHeroCount
+		}
 	}
 
-	val backgroundItem = if (selectedCategory == null) {
-		featuredItems.getOrNull(heroIndex)
-	} else {
-		categoryRows.firstOrNull()?.items?.firstOrNull()
+	val heroItem = when (selectedCategory) {
+		null -> featuredItems.getOrNull(homeHeroIndex)
+		else -> categoryHeroItems.getOrNull(categoryHeroIndex)
 	}
 
 	Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
-		// 1) Full-screen fanart background.
-		ArcticBackground(
-			item = backgroundItem,
-			modifier = Modifier.fillMaxSize(),
-		)
-
-		// 2) Sidebar + main content in a Row so the main content is pushed right when the sidebar expands.
 		Row(Modifier.fillMaxSize()) {
 			ArcticSidebar(
 				expanded = sidebarExpanded,
 				onExpandedChange = { sidebarExpanded = it },
 				initialFocus = sidebarFocus,
-				categories = menuCategories,
+				config = menuConfig,
 				onHome = {
 					selectedCategory = null
 					sidebarExpanded = false
@@ -456,15 +296,16 @@ fun ArcticHomeScreen() {
 				},
 			)
 
-			// 3) Main content area: scrollable, rows sit below the hero stage.
 			ArcticMainContent(
 				modifier = Modifier.weight(1f).fillMaxHeight(),
 				selectedCategory = selectedCategory,
-				hero = featuredItems.getOrNull(heroIndex),
-				featuredCount = featuredItems.size,
-				heroIndex = heroIndex,
-				onHeroIndexChange = { heroIndex = it },
-				rows = rows,
+				heroItem = heroItem,
+				heroCount = activeHeroCount,
+				heroIndex = if (selectedCategory == null) homeHeroIndex else categoryHeroIndex,
+				onHeroIndexChange = { idx ->
+					if (selectedCategory == null) homeHeroIndex = idx else categoryHeroIndex = idx
+				},
+				homeRows = homeRows,
 				categoryRows = categoryRows,
 				categoryLoading = categoryLoading,
 				loaded = loaded,
@@ -478,142 +319,8 @@ fun ArcticHomeScreen() {
 		}
 	}
 
-	// Initial focus goes to the main content, not the sidebar, so the sidebar stays collapsed.
 	LaunchedEffect(Unit) { runCatching { mainContentFocus.requestFocus() } }
 }
-
-/**
- * Build the left-menu categories from the aggregated (region × type) counts.
- * When more than 12 entries exist, the low-count ones are merged into a
- * per-type "其它{type}" catch-all (其它电影 / 其它综艺 / 其它动漫 / 其它纪录片 …).
- */
-private fun buildMenuCategories(
-	counts: Map<Pair<Region, ProgramType>, Int>,
-): List<MenuCategory> {
-	val entries = counts.filterValues { it > 0 }.map { (key, count) ->
-		val (region, type) = key
-		MenuCategory(
-			id = "${region.name}_${type.name}",
-			label = "${region.label}${type.label}",
-			region = region,
-			type = type,
-			isOther = false,
-			count = count,
-			icon = categoryIcon(region, type),
-		)
-	}
-
-	val sorted = entries.sortedByDescending { it.count }
-	if (sorted.size <= 12) return sorted
-
-	// Keep the highest-count entries until we would exceed 12, then merge the
-	// remaining low-count entries into a per-type "其它{type}" entry.
-	val result = mutableListOf<MenuCategory>()
-	val merged = mutableMapOf<ProgramType, Int>()
-	var i = 0
-	while (i < sorted.size) {
-		if (result.size + merged.size >= 12) break
-		result.add(sorted[i])
-		i++
-	}
-	for (j in i until sorted.size) {
-		val e = sorted[j]
-		merged[e.type] = (merged[e.type] ?: 0) + e.count
-	}
-	merged.forEach { (type, count) ->
-		result.add(
-			MenuCategory(
-				id = "OTHER_${type.name}",
-				label = "其它${type.label}",
-				region = Region.OTHER,
-				type = type,
-				isOther = true,
-				count = count,
-				icon = categoryIcon(Region.OTHER, type),
-			),
-		)
-	}
-	return result.sortedWith(compareBy({ it.type.ordinal }, { if (it.isOther) 1 else it.region.ordinal }))
-}
-
-private fun categoryIcon(region: Region, type: ProgramType): Int = when (type) {
-	ProgramType.MOVIE -> R.drawable.ic_movie
-	ProgramType.SERIES -> R.drawable.ic_tv_play
-	ProgramType.VARIETY -> R.drawable.ic_masks
-	ProgramType.ANIME -> R.drawable.ic_album
-	ProgramType.DOC -> R.drawable.ic_camera
-}
-
-// region Background
-
-@Composable
-private fun ArcticBackground(
-	item: BaseItemDto?,
-	modifier: Modifier = Modifier,
-) {
-	val api = koinInject<ApiClient>()
-	val backdrop: JellyfinImage? = item?.itemBackdropImages?.firstOrNull()
-		?: item?.itemImages?.values?.firstOrNull()
-
-	Box(modifier = modifier) {
-		if (backdrop != null) {
-			AsyncImage(
-				url = backdrop.getUrl(api, maxWidth = 1920),
-				blurHash = backdrop.blurHash,
-				// Full screen, cover scale. FUSE 2 uses scale so the artwork fills the stage.
-				scaleType = ImageView.ScaleType.CENTER_CROP,
-				modifier = Modifier.fillMaxSize(),
-			)
-		} else {
-			Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background))
-		}
-
-		// Left-to-right scrim for legible text on the left info panel.
-		Box(
-			Modifier
-				.fillMaxSize()
-				.background(
-					Brush.horizontalGradient(
-						0.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.90f),
-						0.18f to JellyfinTheme.colorScheme.background.copy(alpha = 0.65f),
-						0.40f to JellyfinTheme.colorScheme.background.copy(alpha = 0.28f),
-						0.70f to Color.Transparent,
-						1.00f to Color.Transparent,
-					),
-				),
-		)
-
-		// Bottom scrim so rows are readable against the lower part of the fanart.
-		Box(
-			Modifier
-				.fillMaxSize()
-				.background(
-					Brush.verticalGradient(
-						0.00f to Color.Transparent,
-						0.40f to Color.Transparent,
-						0.75f to JellyfinTheme.colorScheme.background.copy(alpha = 0.78f),
-						1.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.95f),
-					),
-				),
-		)
-
-		// Vignette overlay: centre brighter, edges darker (spotlight feel).
-		Box(
-			Modifier
-				.fillMaxSize()
-				.background(
-					Brush.radialGradient(
-						0.00f to Color.Transparent,
-						0.55f to Color.Transparent,
-						0.88f to JellyfinTheme.colorScheme.background.copy(alpha = 0.40f),
-						1.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.70f),
-					),
-				),
-		)
-	}
-}
-
-// endregion
 
 // region Sidebar
 
@@ -622,32 +329,27 @@ private fun ArcticSidebar(
 	expanded: Boolean,
 	onExpandedChange: (Boolean) -> Unit,
 	initialFocus: FocusRequester,
-	categories: List<MenuCategory>,
+	config: LorlaMenuConfig,
 	onHome: () -> Unit,
 	onSearch: () -> Unit,
 	onSettings: () -> Unit,
-	onCategory: (MenuCategory) -> Unit,
+	onCategory: (CategoryMenuConfig) -> Unit,
 ) {
-	val entries = remember(categories) {
-		buildList {
-			add(Triple(R.drawable.ic_house, "首页", onHome))
-			add(Triple(R.drawable.ic_search, "搜索", onSearch))
-			categories.forEach { cat ->
-				add(Triple(cat.icon, cat.label, { onCategory(cat) }))
-			}
-			add(Triple(R.drawable.ic_settings, "系统设置", onSettings))
-		}
+	val categories = remember(config) {
+		config.categories.filter { it.visible }.sortedBy { it.order }
 	}
 
 	val targetWidth by animateDpAsState(
-		targetValue = if (expanded) 200.dp else 64.dp,
+		targetValue = if (expanded) 216.dp else 64.dp,
 		animationSpec = tween(250),
 		label = "sidebar-width",
 	)
 
-	// Track focus of each sidebar item; expand if any is focused.
-	val focusStates = remember(entries.size) { List(entries.size) { mutableStateOf(false) } }
-	val anyFocused = focusStates.any { it.value }
+	val scrollState = rememberScrollState()
+	val focusStates = remember { mutableListOf<Boolean>() }
+	// Re-allocate focus states when category count changes.
+	val statesList = remember(categories.size) { List(categories.size + 3) { mutableStateOf(false) } }
+	val anyFocused = statesList.any { it.value }
 	LaunchedEffect(anyFocused) { onExpandedChange(anyFocused) }
 
 	Column(
@@ -656,25 +358,47 @@ private fun ArcticSidebar(
 			.width(targetWidth)
 			.background(
 				Brush.horizontalGradient(
-					0.00f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.82f else 0.55f),
-					0.70f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.45f else 0.0f),
+					0.00f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.88f else 0.60f),
+					0.70f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.50f else 0.0f),
 					1.00f to Color.Transparent,
 				),
 			)
-			.padding(vertical = 120.dp),
+			.padding(vertical = 100.dp)
+			.verticalScroll(scrollState),
 		horizontalAlignment = Alignment.CenterHorizontally,
 		verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.Top),
 	) {
-		entries.forEachIndexed { index, (icon, label, onClick) ->
+		SidebarItem(
+			icon = R.drawable.ic_house,
+			label = "首页",
+			expanded = expanded,
+			modifier = Modifier.focusRequester(initialFocus),
+			onFocusChange = { statesList[0].value = it },
+			onClick = onHome,
+		)
+		SidebarItem(
+			icon = R.drawable.ic_search,
+			label = "搜索",
+			expanded = expanded,
+			onFocusChange = { statesList[1].value = it },
+			onClick = onSearch,
+		)
+		categories.forEachIndexed { index, cat ->
 			SidebarItem(
-				icon = icon,
-				label = label,
+				icon = cat.programType.iconRes(),
+				label = cat.label,
 				expanded = expanded,
-				modifier = if (index == 0) Modifier.focusRequester(initialFocus) else Modifier,
-				onFocusChange = { focusStates[index].value = it },
-				onClick = onClick,
+				onFocusChange = { statesList[index + 2].value = it },
+				onClick = { onCategory(cat) },
 			)
 		}
+		SidebarItem(
+			icon = R.drawable.ic_settings,
+			label = "系统设置",
+			expanded = expanded,
+			onFocusChange = { statesList[categories.size + 2].value = it },
+			onClick = onSettings,
+		)
 	}
 }
 
@@ -688,7 +412,6 @@ private fun SidebarItem(
 	modifier: Modifier = Modifier,
 ) {
 	var focused by remember { mutableStateOf(false) }
-	val selected = focused
 
 	Row(
 		modifier = modifier
@@ -696,7 +419,7 @@ private fun SidebarItem(
 			.height(50.dp)
 			.padding(horizontal = if (expanded) 12.dp else 8.dp)
 			.background(
-				if (selected) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.16f) else Color.Transparent,
+				if (focused) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.16f) else Color.Transparent,
 				RoundedCornerShape(10.dp),
 			)
 			.onFocusChanged {
@@ -712,17 +435,17 @@ private fun SidebarItem(
 		Icon(
 			imageVector = ImageVector.vectorResource(icon),
 			contentDescription = label,
-			tint = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.70f),
+			tint = if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.70f),
 			modifier = Modifier.size(22.dp),
 		)
 
 		if (expanded) {
 			Text(
 				label,
-				color = if (selected) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.85f),
+				color = if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.85f),
 				style = JellyfinTheme.typography.default.copy(
 					fontSize = 14.sp,
-					fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+					fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal,
 				),
 				maxLines = 1,
 				overflow = TextOverflow.Ellipsis,
@@ -738,12 +461,12 @@ private fun SidebarItem(
 @Composable
 private fun ArcticMainContent(
 	modifier: Modifier = Modifier,
-	selectedCategory: MenuCategory?,
-	hero: BaseItemDto?,
-	featuredCount: Int,
+	selectedCategory: CategoryMenuConfig?,
+	heroItem: BaseItemDto?,
+	heroCount: Int,
 	heroIndex: Int,
 	onHeroIndexChange: (Int) -> Unit,
-	rows: List<ArcticRow>,
+	homeRows: List<ArcticRow>,
 	categoryRows: List<ArcticRow>,
 	categoryLoading: Boolean,
 	loaded: Boolean,
@@ -757,106 +480,47 @@ private fun ArcticMainContent(
 	val scrollState = rememberScrollState()
 
 	BoxWithConstraints(modifier = modifier) {
-		if (selectedCategory == null) {
-			// ----- Home view: hero stage + library rows -----
-			val configuration = LocalConfiguration.current
-			val screenHeight = configuration.screenHeightDp.dp
-			val heroHeight = if (layoutMode.isFullScreenHero) screenHeight else (screenHeight * 0.68f)
-			val showRows = !layoutMode.isFullScreenHero
+		val configuration = LocalConfiguration.current
+		val screenHeight = configuration.screenHeightDp.dp
 
-			Column(
-				Modifier
-					.fillMaxSize()
-					.verticalScroll(scrollState),
-			) {
-				Box(
-					Modifier
-						.fillMaxWidth()
-						.height(heroHeight),
-				) {
-					// FUSE 2 info panel sits at left=view_side area, top around 200dp.
-					ArcticInfoPanel(
-						modifier = Modifier
-							.fillMaxWidth()
-							.padding(
-								start = view_side_dp,
-								top = 180.dp,
-								end = view_pad_dp,
-								bottom = if (showRows) 60.dp else 80.dp,
-							)
-							.align(Alignment.BottomStart),
-						item = hero,
-						featuredCount = featuredCount,
-						heroIndex = heroIndex,
-						onPlay = { hero?.let(onHeroPlay) },
-						onInfo = { hero?.let(onHeroInfo) },
-						onNextFeatured = {
-							if (featuredCount > 0) onHeroIndexChange((heroIndex + 1) % featuredCount)
-						},
-						onPreviousFeatured = {
-							if (featuredCount > 0) onHeroIndexChange((heroIndex - 1 + featuredCount) % featuredCount)
-						},
-						onCycleLayoutMode = onCycleLayoutMode,
-						layoutMode = layoutMode,
-						initialFocus = initialFocus,
-					)
-				}
-
-				if (showRows) {
-					if (!loaded) {
-						Box(
-							Modifier
-								.fillMaxWidth()
-								.padding(top = 28.dp),
-							contentAlignment = Alignment.Center,
-						) {
-							CircularProgressIndicator(
-								modifier = Modifier.size(40.dp),
-								color = JellyfinTheme.colorScheme.buttonFocused,
-							)
-						}
-					} else {
-						rows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
-						Spacer(Modifier.height(48.dp))
-					}
-				}
+		Column(
+			Modifier
+				.fillMaxSize()
+				.verticalScroll(scrollState),
+		) {
+			val isHome = selectedCategory == null
+			val heroHeight = when {
+				!isHome -> screenHeight * 0.68f
+				layoutMode.isFullScreenHero -> screenHeight
+				else -> screenHeight * 0.68f
 			}
-		} else {
-			// ----- Category view: header + rows of posters -----
-			Column(
-				Modifier
-					.fillMaxSize()
-					.verticalScroll(scrollState),
-			) {
-				Spacer(Modifier.height(48.dp))
-				Row(
-					verticalAlignment = Alignment.CenterVertically,
-					modifier = Modifier.padding(start = view_side_dp, end = view_pad_dp, bottom = 16.dp),
-				) {
-					Box(
-						Modifier
-							.width(4.dp)
-							.height(22.dp)
-							.background(JellyfinTheme.colorScheme.buttonFocused, RoundedCornerShape(2.dp)),
-					)
-					Spacer(Modifier.width(10.dp))
-					Text(
-						selectedCategory.label,
-						color = JellyfinTheme.colorScheme.listHeader,
-						style = JellyfinTheme.typography.default.copy(
-							fontWeight = FontWeight.Bold,
-							fontSize = 28.sp,
-						),
-					)
-					Spacer(Modifier.width(12.dp))
-					Text(
-						"${selectedCategory.count} 部",
-						color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-						style = JellyfinTheme.typography.default.copy(fontSize = 16.sp),
-					)
-				}
+			val showRows = when {
+				!isHome -> true
+				else -> !layoutMode.isFullScreenHero
+			}
 
-				if (categoryLoading) {
+			HeroStage(
+				modifier = Modifier
+					.fillMaxWidth()
+					.height(heroHeight),
+				item = heroItem,
+				featuredCount = heroCount,
+				heroIndex = heroIndex,
+				layoutMode = layoutMode,
+				onPlay = { heroItem?.let(onHeroPlay) },
+				onInfo = { heroItem?.let(onHeroInfo) },
+				onNextFeatured = {
+					if (heroCount > 0) onHeroIndexChange((heroIndex + 1) % heroCount)
+				},
+				onPreviousFeatured = {
+					if (heroCount > 0) onHeroIndexChange((heroIndex - 1 + heroCount) % heroCount)
+				},
+				onCycleLayoutMode = onCycleLayoutMode,
+				initialFocus = initialFocus,
+			)
+
+			if (showRows) {
+				if (!loaded || (selectedCategory != null && categoryLoading)) {
 					Box(
 						Modifier
 							.fillMaxWidth()
@@ -868,30 +532,126 @@ private fun ArcticMainContent(
 							color = JellyfinTheme.colorScheme.buttonFocused,
 						)
 					}
-				} else if (categoryRows.isEmpty()) {
-					Box(
-						Modifier
-							.fillMaxWidth()
-							.padding(top = 28.dp),
-						contentAlignment = Alignment.Center,
-					) {
-						Text(
-							"暂无内容",
-							color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-							style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
-						)
+				} else if (selectedCategory != null) {
+					if (categoryRows.isEmpty()) {
+						Box(
+							Modifier
+								.fillMaxWidth()
+								.padding(top = 28.dp),
+							contentAlignment = Alignment.Center,
+						) {
+							Text(
+								"暂无内容",
+								color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+								style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
+							)
+						}
+					} else {
+						categoryRows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
 					}
 				} else {
-					categoryRows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
-					Spacer(Modifier.height(48.dp))
+					homeRows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
 				}
+				Spacer(Modifier.height(48.dp))
 			}
 		}
 	}
 }
 
-private val view_side_dp = 80.dp
-private val view_pad_dp = 80.dp
+// endregion
+
+// region Hero stage
+
+@Composable
+private fun HeroStage(
+	modifier: Modifier = Modifier,
+	item: BaseItemDto?,
+	featuredCount: Int,
+	heroIndex: Int,
+	layoutMode: HomeLayoutMode,
+	onPlay: () -> Unit,
+	onInfo: () -> Unit,
+	onNextFeatured: () -> Unit,
+	onPreviousFeatured: () -> Unit,
+	onCycleLayoutMode: () -> Unit,
+	initialFocus: FocusRequester,
+) {
+	Box(modifier = modifier) {
+		HeroBackground(item = item, modifier = Modifier.fillMaxSize())
+
+		ArcticInfoPanel(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(
+					start = view_side_dp,
+					top = 160.dp,
+					end = view_pad_dp,
+					bottom = if (layoutMode.isFullScreenHero) 100.dp else 48.dp,
+				)
+				.align(Alignment.BottomStart),
+			item = item,
+			featuredCount = featuredCount,
+			heroIndex = heroIndex,
+			onPlay = onPlay,
+			onInfo = onInfo,
+			onNextFeatured = onNextFeatured,
+			onPreviousFeatured = onPreviousFeatured,
+			onCycleLayoutMode = onCycleLayoutMode,
+			layoutMode = layoutMode,
+			initialFocus = initialFocus,
+		)
+	}
+}
+
+@Composable
+private fun HeroBackground(
+	item: BaseItemDto?,
+	modifier: Modifier = Modifier,
+) {
+	val api = koinInject<ApiClient>()
+	val backdrop: JellyfinImage? = item?.itemBackdropImages?.firstOrNull()
+		?: item?.itemImages?.values?.firstOrNull()
+
+	Box(modifier = modifier) {
+		if (backdrop != null) {
+			AsyncImage(
+				url = backdrop.getUrl(api, maxWidth = 1920),
+				blurHash = backdrop.blurHash,
+				scaleType = ImageView.ScaleType.CENTER_CROP,
+				modifier = Modifier.fillMaxSize(),
+			)
+		} else {
+			Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background))
+		}
+
+		Box(
+			Modifier
+				.fillMaxSize()
+				.background(
+					Brush.horizontalGradient(
+						0.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.92f),
+						0.18f to JellyfinTheme.colorScheme.background.copy(alpha = 0.70f),
+						0.42f to JellyfinTheme.colorScheme.background.copy(alpha = 0.32f),
+						0.75f to Color.Transparent,
+						1.00f to Color.Transparent,
+					),
+				),
+		)
+
+		Box(
+			Modifier
+				.fillMaxSize()
+				.background(
+					Brush.verticalGradient(
+						0.00f to Color.Transparent,
+						0.35f to Color.Transparent,
+						0.72f to JellyfinTheme.colorScheme.background.copy(alpha = 0.80f),
+						1.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.98f),
+					),
+				),
+		)
+	}
+}
 
 @Composable
 private fun ArcticInfoPanel(
@@ -912,15 +672,6 @@ private fun ArcticInfoPanel(
 		verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.Bottom),
 	) {
 		Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-			Text(
-				"KODI".uppercase(),
-				color = JellyfinTheme.colorScheme.buttonFocused,
-				style = JellyfinTheme.typography.default.copy(
-					fontSize = 13.sp,
-					fontWeight = FontWeight.Bold,
-				),
-			)
-
 			Text(
 				item?.name ?: "",
 				color = JellyfinTheme.colorScheme.onBackground,
@@ -977,7 +728,6 @@ private fun ArcticInfoPanel(
 			horizontalArrangement = Arrangement.spacedBy(12.dp),
 			verticalAlignment = Alignment.CenterVertically,
 		) {
-			// Play: pressing LEFT on it cycles to previous featured item.
 			HeroPlayButton(
 				size = 68.dp,
 				iconSize = 24.dp,
@@ -986,7 +736,6 @@ private fun ArcticInfoPanel(
 				focusRequester = initialFocus,
 			)
 
-			// Info: pressing RIGHT on it cycles to next featured item.
 			HeroInfoButton(
 				size = 54.dp,
 				iconSize = 20.dp,
@@ -994,7 +743,6 @@ private fun ArcticInfoPanel(
 				onRight = onNextFeatured,
 			)
 
-			// Dots indicator.
 			if (featuredCount > 1) {
 				Row(
 					horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1015,7 +763,6 @@ private fun ArcticInfoPanel(
 
 			Spacer(Modifier.width(8.dp))
 
-			// Temporary layout-mode switch until the real settings page is ready.
 			HeroSmallButton(
 				label = layoutMode.label.take(2),
 				onClick = onCycleLayoutMode,
@@ -1040,7 +787,7 @@ private fun HeroPlayButton(
 			.size(size)
 			.scale(if (focused) 1.08f else 1f)
 			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.45f),
+				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.50f),
 				CircleShape,
 			)
 			.border(
@@ -1083,7 +830,7 @@ private fun HeroInfoButton(
 			.size(size)
 			.scale(if (focused) 1.08f else 1f)
 			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.45f),
+				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.50f),
 				CircleShape,
 			)
 			.border(
@@ -1125,7 +872,7 @@ private fun HeroSmallButton(
 			.width(46.dp)
 			.scale(if (focused) 1.06f else 1f)
 			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.35f),
+				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.40f),
 				RoundedCornerShape(8.dp),
 			)
 			.border(
@@ -1443,7 +1190,6 @@ private fun CircularDiscCard(
 					modifier = Modifier.fillMaxSize(),
 				)
 			}
-			// Simulate disc hole in the centre.
 			Box(
 				Modifier
 					.size(26.dp)
@@ -1514,7 +1260,6 @@ private fun PortraitWithBarCard(
 			}
 		}
 
-		// Info bar under the poster.
 		Row(
 			modifier = Modifier
 				.width(200.dp)
@@ -1596,5 +1341,8 @@ private fun LargeLandscapeCard(
 		)
 	}
 }
+
+private val view_side_dp = 80.dp
+private val view_pad_dp = 80.dp
 
 // endregion

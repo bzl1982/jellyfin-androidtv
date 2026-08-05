@@ -51,6 +51,7 @@ import org.jellyfin.androidtv.ui.settings.screen.playback.nextup.SettingsPlaybac
 import org.jellyfin.androidtv.ui.settings.screen.playback.nextup.SettingsPlaybackNextUpScreen
 import org.jellyfin.androidtv.ui.settings.lorla.FuseSettingsHomeScreen
 import org.jellyfin.androidtv.ui.settings.lorla.FuseSkinSettingsScreen
+import org.jellyfin.androidtv.ui.settings.lorla.LorlaMenuEditorScreen
 import org.jellyfin.androidtv.ui.settings.screen.screensaver.SettingsScreensaverAgeRatingScreen
 import org.jellyfin.androidtv.ui.settings.screen.screensaver.SettingsScreensaverScreen
 import org.jellyfin.androidtv.ui.settings.screen.screensaver.SettingsScreensaverTimeoutScreen
@@ -61,6 +62,7 @@ object Routes {
 	const val MAIN = "/"
 	const val FUSE_SETTINGS = "/fuse-settings"
 	const val FUSE_SETTINGS_SKIN = "/fuse-settings/skin"
+	const val FUSE_SETTINGS_MENU = "/fuse-settings/menu"
 	const val AUTHENTICATION = "/authentication"
 	const val AUTHENTICATION_FROM_LOGIN = "/authentication+login"
 	const val AUTHENTICATION_SERVER = "/authentication/server/{serverId}"
@@ -123,6 +125,9 @@ val routes = mapOf<String, RouteComposable>(
 	},
 	Routes.FUSE_SETTINGS_SKIN to {
 		FuseSkinSettingsScreen()
+	},
+	Routes.FUSE_SETTINGS_MENU to {
+		LorlaMenuEditorScreen()
 	},
 	Routes.AUTHENTICATION to {
 		SettingsAuthenticationScreen(false)

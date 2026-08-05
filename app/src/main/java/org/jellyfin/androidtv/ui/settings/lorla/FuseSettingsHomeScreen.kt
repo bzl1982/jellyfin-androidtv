@@ -16,7 +16,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,18 +59,17 @@ fun FuseSettingsHomeScreen() {
 
 	val cards = remember {
 		listOf(
-			SettingsCard(R.drawable.ic_folder, "文件管理", "系统"),
-			SettingsCard(R.drawable.ic_grid, "插件", "系统"),
-			SettingsCard(R.drawable.ic_info, "信息", "系统"),
-			SettingsCard(R.drawable.ic_time, "事件日志", "系统"),
-			SettingsCard(R.drawable.ic_masks, "皮肤", "设置", Routes.FUSE_SETTINGS_SKIN),
-			SettingsCard(R.drawable.ic_adjust, "界面", "设置"),
-			SettingsCard(R.drawable.ic_movie, "媒体", "设置"),
-			SettingsCard(R.drawable.ic_play, "播放器", "设置"),
-			SettingsCard(R.drawable.ic_settings, "系统", "设置"),
-			SettingsCard(R.drawable.ic_heart, "服务", "设置"),
-			SettingsCard(R.drawable.ic_tv_timer, "PVR", "设置"),
-			SettingsCard(R.drawable.ic_users, "用户配置", "设置"),
+			SettingsCard(R.drawable.ic_user, "账号与服务器", "切换用户、服务器、自动登录", Routes.AUTHENTICATION),
+			SettingsCard(R.drawable.ic_play, "播放", "播放器、下一集、码率、刷新率", Routes.PLAYBACK),
+			SettingsCard(R.drawable.ic_subtitles, "字幕", "字幕样式、颜色、描边", Routes.CUSTOMIZATION_SUBTITLES),
+			SettingsCard(R.drawable.ic_masks, "界面", "主题、时钟、 watched 标记", Routes.CUSTOMIZATION),
+			SettingsCard(R.drawable.ic_heart, "皮肤", "LORLA 皮肤切换", Routes.FUSE_SETTINGS_SKIN),
+			SettingsCard(R.drawable.ic_movie, "媒体库", "库显示、海报尺寸、图片类型", Routes.LIBRARIES),
+			SettingsCard(R.drawable.ic_house, "首页", "首页分区、排序", Routes.HOME),
+			SettingsCard(R.drawable.ic_tv_timer, "直播电视", "节目单、选项、频道排序", Routes.LIVETV_GUIDE_OPTIONS),
+			SettingsCard(R.drawable.ic_time, "屏保", "屏保超时、年龄分级", Routes.CUSTOMIZATION_SCREENSAVER),
+			SettingsCard(R.drawable.ic_grid, "菜单设置", "调整左侧菜单名称、顺序、子分类", Routes.FUSE_SETTINGS_MENU),
+			SettingsCard(R.drawable.ic_info, "关于", "版本、开源许可", Routes.ABOUT),
 		)
 	}
 
@@ -78,7 +79,6 @@ fun FuseSettingsHomeScreen() {
 			.background(JellyfinTheme.colorScheme.background),
 	) {
 		Row(modifier = Modifier.fillMaxSize()) {
-			// Left edge helpers (close / menu)
 			FuseSettingsEdgeSidebar(
 				onClose = { navigationRepository.goBack() },
 				modifier = Modifier.fillMaxHeight(),
@@ -100,7 +100,9 @@ fun FuseSettingsHomeScreen() {
 				)
 
 				Column(
-					modifier = Modifier.weight(1f),
+					modifier = Modifier
+						.weight(1f)
+						.verticalScroll(rememberScrollState()),
 					verticalArrangement = Arrangement.spacedBy(18.dp),
 				) {
 					cards.chunked(4).forEach { rowCards ->
@@ -112,53 +114,12 @@ fun FuseSettingsHomeScreen() {
 								FuseSettingsCard(
 									card = card,
 									onClick = {
-										when (card.route) {
-											Routes.FUSE_SETTINGS_SKIN -> router.push(card.route)
-											else -> Unit
-										}
+										card.route?.let { router.push(it) }
 									},
 									modifier = Modifier.weight(1f),
 								)
 							}
 						}
-					}
-				}
-
-				// Footer user info
-				Row(
-					verticalAlignment = Alignment.CenterVertically,
-					modifier = Modifier.padding(top = 24.dp),
-				) {
-					Box(
-						modifier = Modifier
-							.size(40.dp)
-							.background(JellyfinTheme.colorScheme.surface, RoundedCornerShape(20.dp)),
-						contentAlignment = Alignment.Center,
-					) {
-						Icon(
-							imageVector = ImageVector.vectorResource(R.drawable.ic_user),
-							contentDescription = null,
-							tint = JellyfinTheme.colorScheme.onBackground,
-							modifier = Modifier.size(22.dp),
-						)
-					}
-
-					Spacer(modifier = Modifier.width(14.dp))
-
-					Column {
-						Text(
-							"Master user",
-							color = JellyfinTheme.colorScheme.onBackground,
-							style = JellyfinTheme.typography.default.copy(
-								fontSize = 15.sp,
-								fontWeight = FontWeight.Bold,
-							),
-						)
-						Text(
-							"Kodi (192.168.31.128)",
-							color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-							style = JellyfinTheme.typography.default.copy(fontSize = 13.sp),
-						)
 					}
 				}
 			}
@@ -233,7 +194,8 @@ private fun FuseSettingsCard(
 				fontSize = 13.sp,
 				textAlign = TextAlign.Center,
 			),
-			maxLines = 1,
+			maxLines = 2,
+			overflow = TextOverflow.Ellipsis,
 		)
 	}
 }
