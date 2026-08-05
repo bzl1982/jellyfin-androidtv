@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.ui.base.CircularProgressIndicator
@@ -483,14 +487,6 @@ private fun ArcticMainContent(
 		val configuration = LocalConfiguration.current
 		val screenHeight = configuration.screenHeightDp.dp
 
-		// When the user navigates into the hero info / play row, ensure the full hero
-		// is visible rather than letting it be clipped to the top of the viewport.
-		val scrollToTop: suspend () -> Unit = {
-			if (scrollState.value > 0) {
-				scrollState.animateScrollTo(0)
-			}
-		}
-
 		Column(
 			Modifier
 				.fillMaxSize()
@@ -505,11 +501,8 @@ private fun ArcticMainContent(
 				},
 		) {
 			val isHome = selectedCategory == null
-			val heroHeight = when {
-				!isHome -> screenHeight * 0.68f
-				layoutMode.isFullScreenHero -> screenHeight
-				else -> screenHeight * 0.68f
-			}
+			// Hero is now always full-screen; rows below are revealed only by scrolling.
+			val heroHeight = screenHeight
 			val showRows = when {
 				!isHome -> true
 				else -> !layoutMode.isFullScreenHero
@@ -533,7 +526,6 @@ private fun ArcticMainContent(
 				},
 				onCycleLayoutMode = onCycleLayoutMode,
 				initialFocus = initialFocus,
-				onFocusBringIntoView = scrollToTop,
 			)
 
 			if (showRows) {
@@ -592,7 +584,6 @@ private fun HeroStage(
 	onPreviousFeatured: () -> Unit,
 	onCycleLayoutMode: () -> Unit,
 	initialFocus: FocusRequester,
-	onFocusBringIntoView: suspend () -> Unit = {},
 ) {
 	Box(modifier = modifier) {
 		HeroBackground(item = item, modifier = Modifier.fillMaxSize())
@@ -602,9 +593,9 @@ private fun HeroStage(
 				.fillMaxWidth()
 				.padding(
 					start = view_side_dp,
-					top = 160.dp,
+					top = 120.dp,
 					end = view_pad_dp,
-					bottom = if (layoutMode.isFullScreenHero) 100.dp else 56.dp,
+					bottom = 60.dp,
 				)
 				.align(Alignment.BottomStart),
 			item = item,
@@ -617,7 +608,6 @@ private fun HeroStage(
 			onCycleLayoutMode = onCycleLayoutMode,
 			layoutMode = layoutMode,
 			initialFocus = initialFocus,
-			onFocusBringIntoView = onFocusBringIntoView,
 		)
 	}
 }
@@ -643,48 +633,32 @@ private fun HeroBackground(
 			Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background))
 		}
 
-		// Left-to-right darken: keep right side of poster visible, darken left for info text.
+		// Single uniform scrim: just enough darkness for left text + bottom controls.
+		// No heavy bottom band — the poster must stay fully visible edge-to-edge.
+		Box(
+			Modifier
+				.fillMaxSize()
+				.background(
+					Brush.verticalGradient(
+						0.00f to Color.Transparent,
+						0.45f to Color.Transparent,
+						0.78f to JellyfinTheme.colorScheme.background.copy(alpha = 0.45f),
+						0.92f to JellyfinTheme.colorScheme.background.copy(alpha = 0.72f),
+						1.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.88f),
+					),
+				),
+		)
+
+		// Left darken so title/meta text on the left side has good contrast.
 		Box(
 			Modifier
 				.fillMaxSize()
 				.background(
 					Brush.horizontalGradient(
-						0.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.92f),
-						0.18f to JellyfinTheme.colorScheme.background.copy(alpha = 0.70f),
-						0.42f to JellyfinTheme.colorScheme.background.copy(alpha = 0.32f),
-						0.75f to Color.Transparent,
-						1.00f to Color.Transparent,
-					),
-				),
-		)
-
-		// Top soft fade for status bar legibility — covers top ~18%.
-		Box(
-			Modifier
-				.fillMaxWidth()
-				.align(Alignment.TopCenter)
-				.fillMaxHeight(0.22f)
-				.background(
-					Brush.verticalGradient(
 						0.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.55f),
+						0.20f to JellyfinTheme.colorScheme.background.copy(alpha = 0.30f),
+						0.45f to Color.Transparent,
 						1.00f to Color.Transparent,
-					),
-				),
-		)
-
-		// Bottom hard mask: a solid color band starting at the bottom of the hero area,
-		// aligned to the poster's bottom edge so poster rows below are not overlapped.
-		Box(
-			Modifier
-				.fillMaxWidth()
-				.align(Alignment.BottomCenter)
-				.fillMaxHeight(0.42f)
-				.background(
-					Brush.verticalGradient(
-						0.00f to Color.Transparent,
-						0.35f to JellyfinTheme.colorScheme.background.copy(alpha = 0.55f),
-						0.80f to JellyfinTheme.colorScheme.background.copy(alpha = 0.92f),
-						1.00f to JellyfinTheme.colorScheme.background,
 					),
 				),
 		)
@@ -703,21 +677,18 @@ private fun ArcticInfoPanel(
 	onCycleLayoutMode: () -> Unit,
 	layoutMode: HomeLayoutMode,
 	initialFocus: FocusRequester,
-	onFocusBringIntoView: suspend () -> Unit = {},
 	modifier: Modifier = Modifier,
 ) {
-	var anyChildFocused by remember { mutableStateOf(false) }
-	LaunchedEffect(anyChildFocused) {
-		if (anyChildFocused) onFocusBringIntoView()
-	}
+	// rememberBringIntoViewRequester: when focus enters the button row below, the
+	// parent scroll container scrolls the row fully into view (and the hero above it).
+	val bringIntoViewRequester = remember { BringIntoViewRequester() }
+	val bringIntoViewScope = rememberCoroutineScope()
 
 	Column(
-		modifier = modifier
-			.onFocusChanged { state ->
-				anyChildFocused = state.isFocused
-			},
-		verticalArrangement = Arrangement.spacedBy(22.dp, Alignment.Bottom),
+		modifier = modifier.fillMaxHeight(),
+		verticalArrangement = Arrangement.Bottom,
 	) {
+		Spacer(Modifier.weight(1f))
 		Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
 			Text(
 				item?.name ?: "",
@@ -771,21 +742,38 @@ private fun ArcticInfoPanel(
 			}
 		}
 
+		// Fixed bottom row: play/info labeled pills + dots + mode label.
+		// Pills are always-visible (not focus-dependent for visibility) so users
+		// can see what controls are available regardless of focus state.
+		// The bringIntoViewRequester triggers a scroll so the row (and the hero above it)
+		// becomes fully visible whenever any of its children receives focus.
 		Row(
-			horizontalArrangement = Arrangement.spacedBy(14.dp),
+			horizontalArrangement = Arrangement.spacedBy(12.dp),
 			verticalAlignment = Alignment.CenterVertically,
+			modifier = Modifier
+				.fillMaxWidth()
+				.bringIntoViewRequester(bringIntoViewRequester)
+				.onFocusChanged { state ->
+					if (state.isFocused) {
+						bringIntoViewScope.launch {
+							bringIntoViewRequester.bringIntoView()
+						}
+					}
+				},
 		) {
-			HeroPlayButton(
-				size = 60.dp,
-				iconSize = 22.dp,
+			HeroPillButton(
+				label = "播放",
+				iconRes = R.drawable.ic_play,
+				isPrimary = true,
 				onClick = onPlay,
 				onLeft = onPreviousFeatured,
 				focusRequester = initialFocus,
 			)
 
-			HeroInfoButton(
-				size = 60.dp,
-				iconSize = 20.dp,
+			HeroPillButton(
+				label = "更多信息",
+				iconRes = R.drawable.ic_info,
+				isPrimary = false,
 				onClick = onInfo,
 				onRight = onNextFeatured,
 			)
@@ -793,14 +781,15 @@ private fun ArcticInfoPanel(
 			if (featuredCount > 1) {
 				Row(
 					horizontalArrangement = Arrangement.spacedBy(6.dp),
-					modifier = Modifier.padding(start = 20.dp),
+					modifier = Modifier.padding(start = 16.dp),
+					verticalAlignment = Alignment.CenterVertically,
 				) {
 					repeat(featuredCount) { i ->
 						Box(
 							Modifier
 								.size(width = if (i == heroIndex) 22.dp else 6.dp, height = 6.dp)
 								.background(
-									if (i == heroIndex) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.35f),
+									if (i == heroIndex) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.45f),
 									RoundedCornerShape(3.dp),
 								),
 						)
@@ -808,10 +797,10 @@ private fun ArcticInfoPanel(
 				}
 			}
 
-			Spacer(Modifier.width(10.dp))
+			Spacer(Modifier.width(8.dp))
 
-			HeroSmallButton(
-				label = layoutMode.label.take(2),
+			HeroModePill(
+				label = layoutMode.label,
 				onClick = onCycleLayoutMode,
 			)
 		}
@@ -819,120 +808,130 @@ private fun ArcticInfoPanel(
 }
 
 @Composable
-private fun HeroPlayButton(
-	size: androidx.compose.ui.unit.Dp,
-	iconSize: androidx.compose.ui.unit.Dp,
+private fun HeroPillButton(
+	label: String,
+	iconRes: Int,
+	isPrimary: Boolean,
 	onClick: () -> Unit,
-	onLeft: () -> Unit,
+	onLeft: (() -> Unit)? = null,
+	onRight: (() -> Unit)? = null,
 	focusRequester: FocusRequester? = null,
 ) {
 	var focused by remember { mutableStateOf(false) }
+	val shape = RoundedCornerShape(10.dp)
 
-	Box(
+	val bg = when {
+		focused -> JellyfinTheme.colorScheme.buttonFocused
+		isPrimary -> JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.92f)
+		else -> Color.Transparent
+	}
+	val content = when {
+		focused -> JellyfinTheme.colorScheme.onButtonFocused
+		isPrimary -> JellyfinTheme.colorScheme.onButtonFocused
+		else -> JellyfinTheme.colorScheme.onBackground
+	}
+	val borderColor = when {
+		focused -> Color.Transparent
+		isPrimary -> Color.Transparent
+		else -> JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f)
+	}
+
+	Row(
 		modifier = Modifier
 			.then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-			.size(size)
-			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.55f),
-				CircleShape,
-			)
+			.height(44.dp)
+			.background(bg, shape)
 			.border(
 				width = if (focused) 2.dp else 1.dp,
-				color = if (focused) Color.Transparent else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.28f),
-				shape = CircleShape,
+				color = borderColor,
+				shape = shape,
 			)
 			.onFocusChanged { focused = it.hasFocus }
 			.onPreviewKeyEvent {
-				if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft) {
-					onLeft()
-					true
+				if (it.type == KeyEventType.KeyDown) {
+					when (it.key) {
+						Key.DirectionLeft -> {
+							onLeft?.invoke()
+							true
+						}
+						Key.DirectionRight -> {
+							onRight?.invoke()
+							true
+						}
+						else -> false
+					}
 				} else {
 					false
 				}
 			}
-			.clickable(onClick = onClick),
-		contentAlignment = Alignment.Center,
+			.clickable(onClick = onClick)
+			.padding(horizontal = 18.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(8.dp),
 	) {
 		Icon(
-			imageVector = ImageVector.vectorResource(R.drawable.ic_play),
+			imageVector = ImageVector.vectorResource(iconRes),
 			contentDescription = null,
-			tint = if (focused) JellyfinTheme.colorScheme.onButtonFocused else JellyfinTheme.colorScheme.onBackground,
-			modifier = Modifier.size(iconSize),
+			tint = content,
+			modifier = Modifier.size(18.dp),
+		)
+		Text(
+			label,
+			color = content,
+			style = JellyfinTheme.typography.default.copy(
+				fontSize = 15.sp,
+				fontWeight = FontWeight.SemiBold,
+				letterSpacing = 0.4.sp,
+			),
+			maxLines = 1,
 		)
 	}
 }
 
 @Composable
-private fun HeroInfoButton(
-	size: androidx.compose.ui.unit.Dp,
-	iconSize: androidx.compose.ui.unit.Dp,
-	onClick: () -> Unit,
-	onRight: () -> Unit,
-) {
-	var focused by remember { mutableStateOf(false) }
-
-	Box(
-		modifier = Modifier
-			.size(size)
-			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.55f),
-				CircleShape,
-			)
-			.border(
-				width = if (focused) 2.dp else 1.dp,
-				color = if (focused) Color.Transparent else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.28f),
-				shape = CircleShape,
-			)
-			.onFocusChanged { focused = it.hasFocus }
-			.onPreviewKeyEvent {
-				if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionRight) {
-					onRight()
-					true
-				} else {
-					false
-				}
-			}
-			.clickable(onClick = onClick),
-		contentAlignment = Alignment.Center,
-	) {
-		Icon(
-			imageVector = ImageVector.vectorResource(R.drawable.ic_info),
-			contentDescription = null,
-			tint = if (focused) JellyfinTheme.colorScheme.onButtonFocused else JellyfinTheme.colorScheme.onBackground,
-			modifier = Modifier.size(iconSize),
-		)
-	}
-}
-
-@Composable
-private fun HeroSmallButton(
+private fun HeroModePill(
 	label: String,
 	onClick: () -> Unit,
 ) {
 	var focused by remember { mutableStateOf(false) }
+	val shape = RoundedCornerShape(10.dp)
 
-	Box(
+	Row(
 		modifier = Modifier
-			.height(36.dp)
-			.width(54.dp)
+			.height(44.dp)
 			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.surface.copy(alpha = 0.45f),
-				RoundedCornerShape(8.dp),
+				if (focused) JellyfinTheme.colorScheme.buttonFocused
+				else JellyfinTheme.colorScheme.surface.copy(alpha = 0.50f),
+				shape,
 			)
 			.border(
 				width = if (focused) 2.dp else 1.dp,
-				color = if (focused) Color.Transparent else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.28f),
-				shape = RoundedCornerShape(8.dp),
+				color = if (focused) Color.Transparent
+					else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.40f),
+				shape = shape,
 			)
 			.onFocusChanged { focused = it.hasFocus }
-			.clickable(onClick = onClick),
-		contentAlignment = Alignment.Center,
+			.clickable(onClick = onClick)
+			.padding(horizontal = 14.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(6.dp),
 	) {
 		Text(
 			label,
-			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused else JellyfinTheme.colorScheme.onBackground,
+			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
+				else JellyfinTheme.colorScheme.onBackground,
 			style = JellyfinTheme.typography.default.copy(
-				fontSize = 12.sp,
+				fontSize = 13.sp,
+				fontWeight = FontWeight.SemiBold,
+			),
+			maxLines = 1,
+		)
+		Text(
+			"⇄",
+			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
+				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.70f),
+			style = JellyfinTheme.typography.default.copy(
+				fontSize = 14.sp,
 				fontWeight = FontWeight.Bold,
 			),
 		)

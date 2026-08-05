@@ -58,7 +58,6 @@ private data class SettingsCard(
 @Composable
 fun FuseSettingsHomeScreen() {
 	val router = LocalRouter.current
-	val navigationRepository = koinInject<NavigationRepository>()
 
 	val accent1 = JellyfinTheme.colorScheme.buttonFocused
 	val accent2 = Color(0xFFFFA94D)
@@ -87,36 +86,30 @@ fun FuseSettingsHomeScreen() {
 			.fillMaxSize()
 			.background(JellyfinTheme.colorScheme.background),
 	) {
-		Row(modifier = Modifier.fillMaxSize()) {
-			FuseSettingsEdgeSidebar(
-				onClose = { navigationRepository.goBack() },
-				modifier = Modifier.fillMaxHeight(),
+		Column(
+			modifier = Modifier
+				.fillMaxSize()
+				.padding(start = 64.dp, top = 56.dp, end = 64.dp, bottom = 40.dp),
+		) {
+			Text(
+				"设置",
+				color = JellyfinTheme.colorScheme.onBackground,
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 42.sp,
+					fontWeight = FontWeight.ExtraBold,
+					letterSpacing = 0.5.sp,
+				),
+				modifier = Modifier.padding(bottom = 6.dp),
 			)
-
-			Column(
-				modifier = Modifier
-					.fillMaxSize()
-					.padding(start = 24.dp, top = 56.dp, end = 64.dp, bottom = 40.dp),
-			) {
-				Text(
-					"设置",
-					color = JellyfinTheme.colorScheme.onBackground,
-					style = JellyfinTheme.typography.default.copy(
-						fontSize = 42.sp,
-						fontWeight = FontWeight.ExtraBold,
-						letterSpacing = 0.5.sp,
-					),
-					modifier = Modifier.padding(bottom = 6.dp),
-				)
-				Text(
-					"个性化你的 LORLA 观影体验",
-					color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-					style = JellyfinTheme.typography.default.copy(
-						fontSize = 15.sp,
-						letterSpacing = 0.3.sp,
-					),
-					modifier = Modifier.padding(bottom = 38.dp),
-				)
+			Text(
+				"个性化你的 LORLA 观影体验",
+				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 15.sp,
+					letterSpacing = 0.3.sp,
+				),
+				modifier = Modifier.padding(bottom = 38.dp),
+			)
 
 				Column(
 					modifier = Modifier
@@ -160,7 +153,6 @@ fun FuseSettingsHomeScreen() {
 						onClick = { router.push(Routes.FUSE_SETTINGS_MENU) },
 					)
 				}
-			}
 		}
 	}
 }
