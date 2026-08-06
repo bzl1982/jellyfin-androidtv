@@ -89,9 +89,14 @@ class SelectServerFragment : Fragment() {
 				}
 
 				// å·²ä¿å­˜çš„æœåŠ¡å™¨ä¸å†é‡å¤å‡ºç°åœ¨ã€Œå‘ç°ã€åŒºï¼šä¸€æ˜¯è§‚æ„Ÿé‡å¤ï¼Œ
-				// äºŒæ˜¯ä¸¤ä¸ªåˆ†åŒºåœ¨åŒä¸€ä¸ª LazyColumn é‡Œï¼ŒåŒ id ä¼šè§¦å‘ duplicate key å´©æºƒã€‚
+				// äºŒæ˜¯ä¸¤ä¸ªåˆ†åŒºåœ¨åŒä¸€ä¸? LazyColumn é‡Œï¼Œå? id ä¼šè§¦å? duplicate key å´©æºƒã€?
+				// ÒÑ±£´æµÄ·şÎñÆ÷²»ÔÙÖØ¸´³öÏÖÔÚ¡¸·¢ÏÖ¡¹Çø£ºË«ÖØÈ¥ÖØ
+				//   (1) ¹ıÂË¿çÁĞ±íÖØ¸´£¨NAS ¼È±»±£´æÓÖ±»·¢ÏÖ¹ã²¥»Ø°ü£©
+				//   (2) ·¢ÏÖ¹ã²¥±¾Éí¿ÉÄÜÊÕµ½¶à·İÏàÍ¬ id »Ø°ü ¡ú Í¬Ò» LazyColumn ÄÚÒ²»á×² key
 				val discoveredOnly = remember(stored, discovered) {
-					discovered.filter { d -> stored.none { it.id == d.id } }
+					discovered
+						.filter { d -> stored.none { it.id == d.id } }
+						.distinctBy { it.id }
 				}
 
 				SelectServerScreen(
@@ -227,8 +232,8 @@ private fun SelectServerScreen(
 			// Stored servers
 			if (storedServers.isNotEmpty()) {
 				item { SectionHeader(stringResource(R.string.saved_servers)) }
-				// key å¿…é¡»å¸¦åˆ†åŒºå‰ç¼€ï¼šåŒä¸€å°æœåŠ¡å™¨å¯èƒ½æ—¢å·²ä¿å­˜ã€åˆè¢«å±€åŸŸç½‘å‘ç°ï¼Œ
-				// ä¸¤ä¸ªåˆ†åŒºåœ¨åŒä¸€ä¸ª LazyColumn é‡Œï¼Œè£¸ç”¨ it.id ä¼š duplicate key å´©æºƒã€‚
+				// key å¿…é¡»å¸¦åˆ†åŒºå‰ç¼€ï¼šåŒä¸€å°æœåŠ¡å™¨å¯èƒ½æ—¢å·²ä¿å­˜ã€åˆè¢«å±€åŸŸç½‘å‘ç°ï¼?
+				// ä¸¤ä¸ªåˆ†åŒºåœ¨åŒä¸€ä¸? LazyColumn é‡Œï¼Œè£¸ç”¨ it.id ä¼? duplicate key å´©æºƒã€?
 				items(storedServers, key = { "stored_${it.id}" }) { server ->
 					ServerCard(
 						server = server,
