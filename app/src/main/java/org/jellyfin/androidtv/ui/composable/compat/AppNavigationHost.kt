@@ -13,6 +13,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import org.jellyfin.androidtv.ui.browsing.DestinationFragmentView
+import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationAction
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.koin.compose.koinInject
@@ -28,7 +29,14 @@ fun AppNavigationHost(
 		navigationRepository.currentAction.map { navigationRepository.canGoBack }.distinctUntilChanged()
 	}.collectAsState(navigationRepository.canGoBack)
 
-	BackHandler(canGoBack) { navigationRepository.goBack() }
+	// BACK never leaves the app. Wherever the user is, one press goes straight
+	// home (the whole stack is dropped, not popped one screen at a time); once
+	// home, the key is swallowed so the TV launcher is unreachable from here.
+	// Screens with their own internal stack (settings, players) still register
+	// their own BackHandler and get the key first.
+	BackHandler(enabled = true) {
+		if (canGoBack) navigationRepository.reset(Destinations.home, clearHistory = true)
+	}
 
 	AndroidView(
 		factory = factory,

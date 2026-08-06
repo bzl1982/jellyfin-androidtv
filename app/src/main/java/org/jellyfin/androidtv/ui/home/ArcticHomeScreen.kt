@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.ui.home
 
 import android.widget.ImageView
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -153,16 +154,19 @@ fun ArcticHomeScreen() {
 	var categoryRows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
 	var categoryLoading by remember { mutableStateOf(false) }
 
-	// Hero layout is a global preference (Settings -> Home -> FUSE 大舞台展示方式).
-	// The remote can also cycle it from the big stage: press RIGHT on the Info
-	// button 8 times to enter layout-switch mode, then RIGHT cycles the 6 modes.
-	// Writes go straight back to the preference store.
-	var heroLayoutMode by remember { mutableStateOf(HeroLayoutModePreferences.get(context)) }
+	// Hero layout is a GLOBAL preference and nothing on this page may write it.
+	// It is picked in Settings -> Home -> FUSE 大舞台展示方式, exactly like the
+	// skin's own SkinSettings. The remote used to be able to cycle this value,
+	// which is how the big stage could silently end up on NO_STAGE and vanish.
+	val heroLayoutMode = remember { HeroLayoutModePreferences.get(context) }
 	val sidebarMode = remember { SidebarModePreferences.get(context) }
 
 	var homeHeroIndex by remember { mutableIntStateOf(0) }
 	var categoryHeroIndex by remember { mutableIntStateOf(0) }
 	var sidebarExpanded by remember { mutableStateOf(false) }
+
+	// Bumped by every BACK press so focus can be re-armed on the play button.
+	var backTick by remember { mutableIntStateOf(0) }
 
 	val sidebarFocus = remember { FocusRequester() }
 	val mainContentFocus = remember { FocusRequester() }
@@ -302,6 +306,15 @@ fun ArcticHomeScreen() {
 		else -> categoryHeroItems.getOrNull(categoryHeroIndex)
 	}
 
+	// The remote's BACK key must NEVER drop the user onto the TV launcher.
+	// On the home screen it either leaves a category (back to the home feed) or
+	// simply re-arms focus on the big stage's play button - it is always
+	// swallowed, so the app can only be left with the TV's own HOME key.
+	BackHandler(enabled = true) {
+		if (selectedCategory != null) selectedCategory = null
+		backTick += 1
+	}
+
 	BoxWithConstraints(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
 		val screenHeight = maxHeight
 		// Netflix-style: the hero is the FIRST screen of one vertical scroll. It is NOT
@@ -332,10 +345,6 @@ fun ArcticHomeScreen() {
 			categoryLoading = categoryLoading,
 			loaded = loaded,
 			heroLayoutMode = heroLayoutMode,
-			onHeroLayoutModeChange = { newMode ->
-				HeroLayoutModePreferences.set(context, newMode)
-				heroLayoutMode = newMode
-			},
 			sidebarExpanded = sidebarExpanded,
 			sidebarMode = sidebarMode,
 			heroHeight = heroHeight,
@@ -377,7 +386,13 @@ fun ArcticHomeScreen() {
 		)
 	}
 
-	LaunchedEffect(Unit) { runCatching { mainContentFocus.requestFocus() } }
+	// Entering the screen, and every BACK press, parks the remote on the big
+	// stage's play button. The stage reacts to gaining focus by gliding the page
+	// back to the top, so BACK always lands on a clean, fully visible home.
+	LaunchedEffect(backTick) {
+		delay(80)
+		runCatching { mainContentFocus.requestFocus() }
+	}
 }
 
 // region Sidebar
@@ -563,7 +578,6 @@ private fun ArcticMainContent(
 	categoryLoading: Boolean,
 	loaded: Boolean,
 	heroLayoutMode: HeroLayoutMode,
-	onHeroLayoutModeChange: (HeroLayoutMode) -> Unit,
 	sidebarExpanded: Boolean,
 	sidebarMode: SidebarMode,
 	heroHeight: Dp,
@@ -601,6 +615,10 @@ private fun ArcticMainContent(
 
 	// One vertical scroll holds the hero (first screen) and all rows below it, so the
 	// whole page glides as a unit — exactly like Netflix's TV home.
+	// LEFT on the leftmost hero control returns to the rail entry that matches
+	// the current view, same rule the poster rows follow.
+	val heroSidebarFocus = if (selectedCategory == null) homeSidebarFocus else categorySidebarFocus
+
 	Column(
 		Modifier
 			.fillMaxSize()
@@ -611,9 +629,14 @@ private fun ArcticMainContent(
 	) {
 		// NO_STAGE removes the big stage entirely (rows start at the top).
 		// SLIDE_STAGE renders the same standard layout but at half height.
-		val stageHeight = if (heroLayoutMode == HeroLayoutMode.SLIDE_STAGE) heroHeight * 0.55f else heroHeight
+		// MINI_STAGE is a short top strip, not a full screen.
+		val stageHeight = when (heroLayoutMode) {
+			HeroLayoutMode.SLIDE_STAGE -> heroHeight * 0.55f
+			HeroLayoutMode.MINI_STAGE -> heroHeight * 0.34f
+			else -> heroHeight
+		}
 		if (heroLayoutMode != HeroLayoutMode.NO_STAGE) {
-			HeroStage(
+			ArcticHeroStage(
 				modifier = Modifier
 					.fillMaxWidth()
 					.height(stageHeight),
@@ -621,7 +644,6 @@ private fun ArcticMainContent(
 				featuredCount = heroCount,
 				heroIndex = heroIndex,
 				layoutMode = heroLayoutMode,
-				onLayoutModeChange = onHeroLayoutModeChange,
 				onPlay = { heroItem?.let(onHeroPlay) },
 				onInfo = { heroItem?.let(onHeroInfo) },
 				onNextFeatured = {
@@ -630,9 +652,10 @@ private fun ArcticMainContent(
 				onPreviousFeatured = {
 					if (heroCount > 0) onHeroIndexChange((heroIndex - 1 + heroCount) % heroCount)
 				},
-				initialFocus = initialFocus,
-				scrollState = scrollState,
 				onDown = { runCatching { firstRowFocus.requestFocus() } },
+				onLeftEdge = { runCatching { heroSidebarFocus.requestFocus() } },
+				playFocus = initialFocus,
+				scrollState = scrollState,
 			)
 		}
 
@@ -702,760 +725,11 @@ private fun ArcticMainContent(
 
 // endregion
 
-// region Hero stage
+// region Hero helpers
 
-@Composable
-private fun HeroStage(
-	modifier: Modifier = Modifier,
-	item: BaseItemDto?,
-	featuredCount: Int,
-	heroIndex: Int,
-	layoutMode: HeroLayoutMode,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	initialFocus: FocusRequester,
-	scrollState: ScrollState,
-	onDown: () -> Unit,
-) {
-	val scope = rememberCoroutineScope()
-	val context = LocalContext.current
-	// Layout-switch state lives HERE (not in HeroControlRow): when the layout
-	// changes, the row below recomposes, but this stage does not, so the counter
-	// survives a switch.
-	var rightPressCount by remember { mutableIntStateOf(0) }
-	var switchingLayout by remember { mutableStateOf(false) }
-
-	val onInfoRight = {
-		if (switchingLayout) {
-			// Layout-switch mode: RIGHT cycles the 6 hero layouts (persisted).
-			val entries = HeroLayoutMode.entries
-			val next = entries[(HeroLayoutModePreferences.get(context).ordinal + 1) % entries.size]
-			onLayoutModeChange(next)
-			Toast.makeText(context, "大舞台：${next.label}", Toast.LENGTH_SHORT).show()
-		} else {
-			rightPressCount += 1
-			if (rightPressCount >= 8) {
-				// The 8th press enters layout-switch mode and applies one switch.
-				switchingLayout = true
-				rightPressCount = 0
-				val entries = HeroLayoutMode.entries
-				val next = entries[(HeroLayoutModePreferences.get(context).ordinal + 1) % entries.size]
-				onLayoutModeChange(next)
-				Toast.makeText(context, "大舞台：${next.label}（按其他键退出）", Toast.LENGTH_SHORT).show()
-			} else {
-				onNextFeatured()
-			}
-		}
-	}
-	val onExitLayoutSwitch = {
-		if (switchingLayout) {
-			switchingLayout = false
-			rightPressCount = 0
-		}
-	}
-
-	// When focus returns to the hero (e.g. UP from the first row), glide the whole
-	// page back to the top so the big stage is fully visible again.
-	Box(
-		modifier
-			.onFocusChanged {
-				// hasFocus (not isFocused): the Info button inside is what actually
-				// takes focus — the stage box must see child focus to snap the page
-				// back to the top when the remote returns to the big stage.
-				if (it.hasFocus) scope.launch { runCatching { scrollState.animateScrollTo(0) } }
-			},
-	) {
-		// Backdrop now lives INSIDE the scroll, so it scrolls away with the page
-		// instead of staying pinned behind the rows.
-		HeroBackground(
-			item = item,
-			modifier = Modifier.fillMaxSize(),
-		)
-
-		when (layoutMode) {
-			HeroLayoutMode.FULL_BLEED_LEFT_INFO,
-			HeroLayoutMode.SLIDE_STAGE,
-			-> HeroInfoPanelLeft(
-				modifier = Modifier.fillMaxSize(),
-				item = item,
-				featuredCount = featuredCount,
-				heroIndex = heroIndex,
-				onPlay = onPlay,
-				onInfo = onInfo,
-				onNextFeatured = onNextFeatured,
-				onPreviousFeatured = onPreviousFeatured,
-				onLayoutModeChange = onLayoutModeChange,
-				switchingLayout = switchingLayout,
-				onInfoRight = onInfoRight,
-				onExitLayoutSwitch = onExitLayoutSwitch,
-				initialFocus = initialFocus,
-				onDown = onDown,
-			)
-
-			HeroLayoutMode.SHOWCASE_COLLAGE -> HeroShowcaseCollage(
-				modifier = Modifier.fillMaxSize(),
-				item = item,
-				featuredCount = featuredCount,
-				heroIndex = heroIndex,
-				onPlay = onPlay,
-				onInfo = onInfo,
-				onNextFeatured = onNextFeatured,
-				onPreviousFeatured = onPreviousFeatured,
-				onLayoutModeChange = onLayoutModeChange,
-				switchingLayout = switchingLayout,
-				onInfoRight = onInfoRight,
-				onExitLayoutSwitch = onExitLayoutSwitch,
-				initialFocus = initialFocus,
-				onDown = onDown,
-			)
-
-			HeroLayoutMode.FANART_ONLY -> HeroFanartOnly(
-				modifier = Modifier.fillMaxSize(),
-				item = item,
-				featuredCount = featuredCount,
-				heroIndex = heroIndex,
-				onPlay = onPlay,
-				onInfo = onInfo,
-				onNextFeatured = onNextFeatured,
-				onPreviousFeatured = onPreviousFeatured,
-				onLayoutModeChange = onLayoutModeChange,
-				switchingLayout = switchingLayout,
-				onInfoRight = onInfoRight,
-				onExitLayoutSwitch = onExitLayoutSwitch,
-				initialFocus = initialFocus,
-				onDown = onDown,
-			)
-
-			HeroLayoutMode.MINI_STAGE -> HeroMiniStage(
-				modifier = Modifier.fillMaxSize(),
-				item = item,
-				onPlay = onPlay,
-				onInfo = onInfo,
-				onNextFeatured = onNextFeatured,
-				onPreviousFeatured = onPreviousFeatured,
-				onLayoutModeChange = onLayoutModeChange,
-				switchingLayout = switchingLayout,
-				onInfoRight = onInfoRight,
-				onExitLayoutSwitch = onExitLayoutSwitch,
-				initialFocus = initialFocus,
-				onDown = onDown,
-			)
-
-			HeroLayoutMode.NO_STAGE -> Unit
-		}
-	}
-}
-
-@Composable
-private fun HeroBackground(
-	item: BaseItemDto?,
-	modifier: Modifier = Modifier,
-) {
-	val api = koinInject<ApiClient>()
-	val backdrop: JellyfinImage? = item?.itemBackdropImages?.firstOrNull()
-		?: item?.itemImages?.values?.firstOrNull()
-
-	Box(modifier = modifier) {
-		if (backdrop != null) {
-			AsyncImage(
-				url = backdrop.getUrl(api, maxWidth = 1920),
-				blurHash = backdrop.blurHash,
-				scaleType = ImageView.ScaleType.CENTER_CROP,
-				modifier = Modifier.fillMaxSize(),
-			)
-		} else {
-			Box(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background))
-		}
-
-		// Single uniform scrim: just enough darkness for left text + bottom controls.
-		// No heavy bottom band — the poster must stay fully visible edge-to-edge.
-		Box(
-			Modifier
-				.fillMaxSize()
-				.background(
-					Brush.verticalGradient(
-						0.00f to Color.Transparent,
-						0.45f to Color.Transparent,
-						0.78f to JellyfinTheme.colorScheme.background.copy(alpha = 0.45f),
-						0.92f to JellyfinTheme.colorScheme.background.copy(alpha = 0.72f),
-						1.00f to JellyfinTheme.colorScheme.background,
-					),
-				),
-		)
-
-		// Left darken so title/meta text on the left side has good contrast.
-		Box(
-			Modifier
-				.fillMaxSize()
-				.background(
-					Brush.horizontalGradient(
-						0.00f to JellyfinTheme.colorScheme.background.copy(alpha = 0.55f),
-						0.20f to JellyfinTheme.colorScheme.background.copy(alpha = 0.30f),
-						0.45f to Color.Transparent,
-						1.00f to Color.Transparent,
-					),
-				),
-		)
-	}
-}
-
-@Composable
-private fun HeroInfoPanelLeft(
-	modifier: Modifier = Modifier,
-	item: BaseItemDto?,
-	featuredCount: Int,
-	heroIndex: Int,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	switchingLayout: Boolean,
-	onInfoRight: () -> Unit,
-	onExitLayoutSwitch: () -> Unit,
-	initialFocus: FocusRequester,
-	onDown: () -> Unit,
-) {
-	val bringIntoViewRequester = remember { BringIntoViewRequester() }
-	val bringIntoViewScope = rememberCoroutineScope()
-
-	Column(
-		modifier = modifier
-			.fillMaxHeight()
-			.padding(
-				start = 24.dp,
-				top = 120.dp,
-				end = view_pad_dp,
-				bottom = 60.dp,
-			),
-		verticalArrangement = Arrangement.Bottom,
-	) {
-		Spacer(Modifier.weight(1f))
-		Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-			Text(
-				item?.name ?: "",
-				color = JellyfinTheme.colorScheme.onBackground,
-				style = JellyfinTheme.typography.default.copy(
-					fontSize = 46.sp,
-					fontWeight = FontWeight.Bold,
-				),
-				maxLines = 2,
-				overflow = TextOverflow.Ellipsis,
-			)
-
-			HeroMetaRow(item = item)
-
-			item?.overview?.let { overview ->
-				Text(
-					overview,
-					color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.82f),
-					style = JellyfinTheme.typography.default.copy(fontSize = 15.sp, lineHeight = 22.sp),
-					maxLines = 3,
-					overflow = TextOverflow.Ellipsis,
-					modifier = Modifier.width(680.dp),
-				)
-			}
-		}
-
-		HeroControlRow(
-			modifier = Modifier
-				.fillMaxWidth()
-				.padding(top = 24.dp)
-				.bringIntoViewRequester(bringIntoViewRequester)
-				.onFocusChanged { state ->
-					if (state.isFocused) {
-						bringIntoViewScope.launch {
-							bringIntoViewRequester.bringIntoView()
-						}
-					}
-				},
-			onDown = onDown,
-			featuredCount = featuredCount,
-			heroIndex = heroIndex,
-			onPlay = onPlay,
-			onInfo = onInfo,
-			onNextFeatured = onNextFeatured,
-			onPreviousFeatured = onPreviousFeatured,
-			onLayoutModeChange = onLayoutModeChange,
-			switchingLayout = switchingLayout,
-			onInfoRight = onInfoRight,
-			onExitLayoutSwitch = onExitLayoutSwitch,
-			initialFocus = initialFocus,
-		)
-	}
-}
-
-@Composable
-private fun HeroShowcaseCollage(
-	modifier: Modifier = Modifier,
-	item: BaseItemDto?,
-	featuredCount: Int,
-	heroIndex: Int,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	switchingLayout: Boolean,
-	onInfoRight: () -> Unit,
-	onExitLayoutSwitch: () -> Unit,
-	initialFocus: FocusRequester,
-	onDown: () -> Unit,
-) {
-	val api = koinInject<ApiClient>()
-	// Cast collage: pull up to 9 people (head shots) and tile them over a dimmed
-	// backdrop on the right side — the Arctic Fuse "showcase" look.
-	// The people are fetched ON DEMAND for the current item (NOT via the home
-	// Items request — bundling People into that list made the response huge and
-	// the home screen hung on a black screen).
-	var people by remember(item?.id) { mutableStateOf<List<BaseItemPerson>>(emptyList()) }
-	LaunchedEffect(item?.id) {
-		people = emptyList()
-		if (item?.id != null) {
-			// Fetch ONLY this item's people (single-id Items request with the
-			// PEOPLE field) — bundling People into the whole home list made the
-			// response huge and hung the screen.
-			runCatching {
-				api.itemsApi.getItems(
-					ids = setOf(item.id),
-					fields = setOf(ItemFields.PEOPLE),
-					recursive = true,
-				).content.items.orEmpty().firstOrNull()?.people.orEmpty()
-			}.getOrElse { emptyList() }.take(9).let { people = it }
-		}
-	}
-	val actors = people
-
-	Box(modifier = modifier) {
-		// Dim the base backdrop a bit harder so the collage pops.
-		Box(
-			Modifier
-				.fillMaxSize()
-				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f)),
-		)
-
-		if (actors.isNotEmpty()) {
-			// Right-side collage: 3 columns x up to 3 rows of circular head shots.
-			val rows = actors.chunked(3)
-			Column(
-				modifier = Modifier
-					.fillMaxHeight()
-					.align(Alignment.CenterEnd)
-					.padding(end = 40.dp),
-				verticalArrangement = Arrangement.Center,
-				horizontalAlignment = Alignment.End,
-			) {
-				rows.forEach { rowActors ->
-					Row(
-						horizontalArrangement = Arrangement.spacedBy(14.dp),
-						modifier = Modifier.padding(vertical = 7.dp),
-					) {
-						rowActors.forEach { person ->
-							val head = person.primaryImage
-							Box(
-								Modifier
-									.size(88.dp)
-									.clip(CircleShape)
-									.background(JellyfinTheme.colorScheme.surface.copy(alpha = 0.9f))
-									.border(
-										2.dp,
-										JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.25f),
-										CircleShape,
-									),
-							) {
-								if (head != null) {
-									AsyncImage(
-										url = head.getUrl(api, maxWidth = 200),
-										scaleType = ImageView.ScaleType.CENTER_CROP,
-										modifier = Modifier.fillMaxSize(),
-									)
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-
-		// Left info tower + bottom control row — same as the standard stage.
-		HeroInfoPanelLeft(
-			modifier = Modifier.fillMaxSize(),
-			item = item,
-			featuredCount = featuredCount,
-			heroIndex = heroIndex,
-			onPlay = onPlay,
-			onInfo = onInfo,
-			onNextFeatured = onNextFeatured,
-			onPreviousFeatured = onPreviousFeatured,
-			onLayoutModeChange = onLayoutModeChange,
-			switchingLayout = switchingLayout,
-			onInfoRight = onInfoRight,
-			onExitLayoutSwitch = onExitLayoutSwitch,
-			initialFocus = initialFocus,
-			onDown = onDown,
-		)
-	}
-}
-
-@Composable
-private fun HeroFanartOnly(
-	modifier: Modifier = Modifier,
-	item: BaseItemDto?,
-	featuredCount: Int,
-	heroIndex: Int,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	switchingLayout: Boolean,
-	onInfoRight: () -> Unit,
-	onExitLayoutSwitch: () -> Unit,
-	initialFocus: FocusRequester,
-	onDown: () -> Unit,
-) {
-	// Pure artwork stage: no info tower, just a small title top-right and the
-	// control row bottom-center. The full-bleed backdrop is already painted by
-	// HeroStage.
-	Box(modifier = modifier) {
-		Column(
-			modifier = Modifier
-				.fillMaxWidth()
-				.align(Alignment.TopEnd)
-				.padding(top = 36.dp, end = 48.dp),
-			horizontalAlignment = Alignment.End,
-		) {
-			Text(
-				item?.name ?: "",
-				color = JellyfinTheme.colorScheme.onBackground,
-				style = JellyfinTheme.typography.default.copy(
-					fontSize = 26.sp,
-					fontWeight = FontWeight.SemiBold,
-				),
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
-		}
-
-		Box(
-			modifier = Modifier
-				.fillMaxWidth()
-				.align(Alignment.BottomCenter)
-				.padding(bottom = 48.dp),
-		) {
-			HeroControlRow(
-				modifier = Modifier.fillMaxWidth(),
-				onDown = onDown,
-				featuredCount = featuredCount,
-				heroIndex = heroIndex,
-				onPlay = onPlay,
-				onInfo = onInfo,
-				onNextFeatured = onNextFeatured,
-				onPreviousFeatured = onPreviousFeatured,
-				onLayoutModeChange = onLayoutModeChange,
-				switchingLayout = switchingLayout,
-				onInfoRight = onInfoRight,
-				onExitLayoutSwitch = onExitLayoutSwitch,
-				initialFocus = initialFocus,
-			)
-		}
-	}
-}
-
-@Composable
-private fun HeroMiniStage(
-	modifier: Modifier = Modifier,
-	item: BaseItemDto?,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	switchingLayout: Boolean,
-	onInfoRight: () -> Unit,
-	onExitLayoutSwitch: () -> Unit,
-	initialFocus: FocusRequester,
-	onDown: () -> Unit,
-) {
-	val api = koinInject<ApiClient>()
-	val poster = item?.itemImages?.values?.firstOrNull() ?: item?.itemBackdropImages?.firstOrNull()
-
-	// Compact top strip: small poster + title + control row, all in one line.
-	Row(
-		modifier = modifier
-			.fillMaxWidth()
-			.padding(start = 36.dp, top = 24.dp, end = 36.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(24.dp),
-	) {
-		Box(
-			Modifier
-				.size(width = 76.dp, height = 112.dp)
-				.clip(RoundedCornerShape(8.dp))
-				.background(JellyfinTheme.colorScheme.surface.copy(alpha = 0.6f)),
-		) {
-			if (poster != null) {
-				AsyncImage(
-					url = poster.getUrl(api, maxWidth = 200),
-					blurHash = poster.blurHash,
-					scaleType = ImageView.ScaleType.FIT_CENTER,
-					modifier = Modifier.fillMaxSize(),
-				)
-			}
-		}
-
-		Column(
-			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(6.dp),
-		) {
-			Text(
-				item?.name ?: "",
-				color = JellyfinTheme.colorScheme.onBackground,
-				style = JellyfinTheme.typography.default.copy(
-					fontSize = 28.sp,
-					fontWeight = FontWeight.Bold,
-				),
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
-			HeroMetaRow(item = item)
-		}
-
-		HeroControlRow(
-			modifier = Modifier.fillMaxWidth(),
-			onDown = onDown,
-			featuredCount = 0,
-			heroIndex = 0,
-			onPlay = onPlay,
-			onInfo = onInfo,
-			onNextFeatured = onNextFeatured,
-			onPreviousFeatured = onPreviousFeatured,
-			onLayoutModeChange = onLayoutModeChange,
-			switchingLayout = switchingLayout,
-			onInfoRight = onInfoRight,
-			onExitLayoutSwitch = onExitLayoutSwitch,
-			initialFocus = initialFocus,
-		)
-	}
-}
-
-@Composable
-private fun HeroMetaRow(item: BaseItemDto?) {
-	Row(
-		horizontalArrangement = Arrangement.spacedBy(10.dp),
-		verticalAlignment = Alignment.CenterVertically,
-	) {
-		Box(
-			Modifier
-				.background(
-					JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.18f),
-					RoundedCornerShape(4.dp),
-				)
-				.padding(horizontal = 8.dp, vertical = 3.dp),
-		) {
-			Text(
-				"INFO",
-				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.90f),
-				style = JellyfinTheme.typography.default.copy(
-					fontSize = 12.sp,
-					fontWeight = FontWeight.Bold,
-				),
-			)
-		}
-		Text(
-			buildHeroMeta(item),
-			color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
-			style = JellyfinTheme.typography.default.copy(fontSize = 15.sp),
-			maxLines = 1,
-		)
-	}
-}
-
-@Composable
-private fun HeroControlRow(
-	modifier: Modifier = Modifier,
-	onDown: () -> Unit,
-	featuredCount: Int,
-	heroIndex: Int,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	switchingLayout: Boolean,
-	onInfoRight: () -> Unit,
-	onExitLayoutSwitch: () -> Unit,
-	initialFocus: FocusRequester? = null,
-) {
-	// Remote interaction model for the big stage:
-	//  - The only focusable control on the hero is the "更多信息" button (the play
-	//    pill is decorative; the dots are never focusable).
-	//  - RIGHT on Info: step to the next featured item (the dots advance with it).
-	//  - The 8th RIGHT press enters layout-switch mode: every further RIGHT cycles
-	//    the 6 hero layouts (persisted). Any key other than RIGHT exits the mode.
-	// The counter/state live in HeroStage so they survive a layout switch.
-
-	// Re-grab focus on the Info button whenever this row (re)enters composition,
-	// which happens after a layout switch — keeps the remote on the one control.
-	LaunchedEffect(Unit) {
-		if (initialFocus != null) runCatching { initialFocus.requestFocus() }
-	}
-
-	Row(
-		horizontalArrangement = Arrangement.spacedBy(12.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		modifier = modifier
-			.fillMaxWidth()
-			.onPreviewKeyEvent {
-				if (it.type == KeyEventType.KeyDown) {
-					when (it.key) {
-						Key.DirectionDown -> {
-							// Any key that is not RIGHT also exits layout-switch mode.
-							onExitLayoutSwitch()
-							onDown()
-							true
-						}
-						Key.DirectionRight -> false // handled by the Info button itself
-						else -> {
-							onExitLayoutSwitch()
-							false
-						}
-					}
-				} else {
-					false
-				}
-			},
-	) {
-		HeroPillButton(
-			label = "播放",
-			iconRes = R.drawable.ic_play,
-			isPrimary = true,
-			canFocus = false,
-			onClick = onPlay,
-		)
-
-		HeroPillButton(
-			label = if (switchingLayout) "切换展示形式" else "更多信息",
-			iconRes = R.drawable.ic_info,
-			isPrimary = false,
-			canFocus = true,
-			onClick = onInfo,
-			onRight = onInfoRight,
-			onDown = onDown,
-			focusRequester = initialFocus,
-		)
-
-		if (featuredCount > 1) {
-			Row(
-				horizontalArrangement = Arrangement.spacedBy(6.dp),
-				modifier = Modifier.padding(start = 16.dp),
-				verticalAlignment = Alignment.CenterVertically,
-			) {
-				repeat(featuredCount) { i ->
-					Box(
-						Modifier
-							.size(width = if (i == heroIndex) 22.dp else 6.dp, height = 6.dp)
-							.background(
-								if (i == heroIndex) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.45f),
-								RoundedCornerShape(3.dp),
-							),
-					)
-				}
-			}
-		}
-	}
-}
-
-@Composable
-private fun HeroPillButton(
-	label: String,
-	iconRes: Int,
-	isPrimary: Boolean,
-	onClick: () -> Unit,
-	canFocus: Boolean = true,
-	onLeft: (() -> Unit)? = null,
-	onRight: (() -> Unit)? = null,
-	onDown: (() -> Unit)? = null,
-	focusRequester: FocusRequester? = null,
-) {
-	var focused by remember { mutableStateOf(false) }
-	val shape = RoundedCornerShape(10.dp)
-
-	val bg = when {
-		focused -> JellyfinTheme.colorScheme.buttonFocused
-		isPrimary -> JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.92f)
-		else -> Color.Transparent
-	}
-	val content = when {
-		focused -> JellyfinTheme.colorScheme.onButtonFocused
-		isPrimary -> JellyfinTheme.colorScheme.onButtonFocused
-		else -> JellyfinTheme.colorScheme.onBackground
-	}
-	val borderColor = when {
-		focused -> Color.Transparent
-		isPrimary -> Color.Transparent
-		else -> JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f)
-	}
-
-	Row(
-		modifier = Modifier
-			.then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-			.then(if (canFocus) Modifier.focusRestorer() else Modifier.focusProperties { this.canFocus = false })
-			.height(44.dp)
-			.background(bg, shape)
-			.border(
-				width = if (focused) 2.dp else 1.dp,
-				color = borderColor,
-				shape = shape,
-			)
-			.then(if (canFocus) Modifier.onFocusChanged { focused = it.hasFocus } else Modifier)
-			.onPreviewKeyEvent {
-				if (it.type == KeyEventType.KeyDown && canFocus) {
-					when (it.key) {
-						Key.DirectionLeft -> {
-							onLeft?.invoke()
-							true
-						}
-						Key.DirectionRight -> {
-							onRight?.invoke()
-							true
-						}
-						Key.DirectionDown -> {
-							onDown?.invoke()
-							true
-						}
-						else -> false
-					}
-				} else {
-					false
-				}
-			}
-			.clickable(onClick = onClick)
-			.padding(horizontal = 18.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(8.dp),
-	) {
-		Icon(
-			imageVector = ImageVector.vectorResource(iconRes),
-			contentDescription = null,
-			tint = content,
-			modifier = Modifier.size(18.dp),
-		)
-		Text(
-			label,
-			color = content,
-			style = JellyfinTheme.typography.default.copy(
-				fontSize = 15.sp,
-				fontWeight = FontWeight.SemiBold,
-				letterSpacing = 0.4.sp,
-			),
-			maxLines = 1,
-		)
-	}
-}
+// The big stage itself now lives in ArcticHeroStage.kt - see the notes there
+// for why it was rebuilt (it used to be able to write NO_STAGE into the
+// preference store from the remote and disappear for good).
 
 private fun buildHeroMeta(item: BaseItemDto?): String = buildString {
 	item ?: return@buildString
