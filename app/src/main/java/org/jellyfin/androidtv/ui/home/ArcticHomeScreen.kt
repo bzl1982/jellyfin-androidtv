@@ -675,7 +675,7 @@ private fun ArcticMainContent(
 				// would be missing and the sidebar's RIGHT key has nothing to land on,
 				// stranding the remote on the rail. Re-use mainContentFocus as the
 				// first-row-first-poster anchor in that case so the chain stays live.
-				val effectiveFirstRowFocus = if (heroLayoutMode == HeroLayoutMode.NO_STAGE) mainContentFocus else firstRowFocus
+				val effectiveFirstRowFocus = if (heroLayoutMode == HeroLayoutMode.NO_STAGE) initialFocus else firstRowFocus
 				ArcticRowView(
 					title = row.title,
 					items = row.items,
