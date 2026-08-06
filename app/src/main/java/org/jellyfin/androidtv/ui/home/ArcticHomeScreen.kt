@@ -101,6 +101,11 @@ import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.SortOrder
 import org.koin.compose.koinInject
+import android.graphics.Bitmap
+import coil3.ImageLoader
+import coil3.request.ImageRequest
+import coil3.toBitmap
+import kotlin.math.maxOf
 import kotlin.math.roundToInt
 
 // region Data model
@@ -169,8 +174,14 @@ fun ArcticHomeScreen() {
 	val heroLayoutMode = remember { HeroLayoutModePreferences.get(context) }
 	val sidebarMode = remember { SidebarModePreferences.get(context) }
 
-	var homeHeroIndex by remember { mutableIntStateOf(0) }
-	var categoryHeroIndex by remember { mutableIntStateOf(0) }
+	// 大舞台 = 「当前选中项」的实时预览（FUSE Spotlight 行为）：底部竖海报被
+	// 选中时，大舞台立即显示那部片的大海报 + 左侧详情。activeItem 由海报聚焦驱动。
+	var activeItem by remember { mutableStateOf<BaseItemDto?>(null) }
+	// 当前选中海报的主题色（边缘采样），用于全屏渐变染色。
+	var themeColor by remember { mutableStateOf(Color(0xFF1A1D24)) }
+	var browseIndex by remember { mutableIntStateOf(0) }
+	val themeColorCache = remember { mutableMapOf<String, Color>() }
+	val imageLoader = koinInject<ImageLoader>()
 	var sidebarExpanded by remember { mutableStateOf(false) }
 
 	// Bumped by every BACK press so focus can be re-armed on the play button.
@@ -255,11 +266,14 @@ fun ArcticHomeScreen() {
 				}
 				// 初次进入只生成前几个栏目，减轻一次性渲染压力；其余在设置里开启。
 				val visibleRows = if (HomeRowsPreferences.getLoadAll(context)) typeRows else typeRows.take(HOME_ROWS_INITIAL)
+				// 大舞台初始选中：最新带图影片（与 featured 一致）。
+				val initialActive = featured.firstOrNull() ?: typeRows.firstOrNull()?.items?.firstOrNull()
 
 				withContext(Dispatchers.Main) {
 					allItems = classified
 					featuredItems = featured
 					homeRows = visibleRows
+					if (activeItem == null) activeItem = initialActive
 					loaded = true
 				}
 			}.onFailure { it.printStackTrace() }
@@ -275,7 +289,7 @@ fun ArcticHomeScreen() {
 			return@LaunchedEffect
 		}
 		categoryLoading = true
-		categoryHeroIndex = 0
+		browseIndex = 0
 		withContext(Dispatchers.Default) {
 			val matching = allItems.filter { it.programType == cat.programType && it.bucket == cat.regionBucket }
 			// Cap the category big stage at 7 too, same as the home one.
@@ -299,26 +313,50 @@ fun ArcticHomeScreen() {
 			withContext(Dispatchers.Main) {
 				categoryHeroItems = heroItems
 				categoryRows = rows
+				// 进入分类时把大舞台切换到该分类的首个影片。
+				if (cat != null) {
+					activeItem = heroItems.firstOrNull() ?: rows.firstOrNull()?.items?.firstOrNull()
+					browseIndex = 0
+				}
 				categoryLoading = false
 			}
 		}
 	}
 
-	// Auto-rotate the hero every 8s.
-	val activeHeroCount = if (selectedCategory == null) featuredItems.size else categoryHeroItems.size
-	LaunchedEffect(homeHeroIndex, categoryHeroIndex, selectedCategory, activeHeroCount) {
-		if (activeHeroCount <= 1) return@LaunchedEffect
-		delay(8_000)
-		if (selectedCategory == null) {
-			homeHeroIndex = (homeHeroIndex + 1) % activeHeroCount
-		} else {
-			categoryHeroIndex = (categoryHeroIndex + 1) % activeHeroCount
-		}
+	// 浏览列表：大舞台左右箭头、海报选中都在其中步进。随视图（首页/分类）变化。
+	val browseList = remember(homeRows, categoryRows, featuredItems, categoryHeroItems, selectedCategory) {
+		if (selectedCategory == null) (homeRows.flatMap { it.items } + featuredItems).distinctBy { it.id }
+		else (categoryHeroItems + categoryRows.flatMap { it.items }).distinctBy { it.id }
 	}
 
-	val heroItem = when (selectedCategory) {
-		null -> featuredItems.getOrNull(homeHeroIndex)
-		else -> categoryHeroItems.getOrNull(categoryHeroIndex)
+	// 海报聚焦驱动大舞台：更新选中项并在浏览列表中定位（用于左右箭头高亮）。
+	val setActiveItem: (BaseItemDto?) -> Unit = { item ->
+		activeItem = item
+		val idx = browseList.indexOfFirst { it.id == item?.id }
+		if (idx >= 0) browseIndex = idx
+	}
+
+	// 选中海报的主题色：从背景图边缘采样，缓存避免重复网络拉取与计算。
+	LaunchedEffect(activeItem?.id) {
+		val item = activeItem ?: return@LaunchedEffect
+		themeColorCache[item.id]?.let { cached ->
+			themeColor = cached
+			return@LaunchedEffect
+		}
+		val bd = item.itemBackdropImages.firstOrNull() ?: item.itemImages.values.firstOrNull() ?: return@LaunchedEffect
+		val url = bd.getUrl(api, maxWidth = 240)
+		withContext(Dispatchers.IO) {
+			runCatching {
+				val bmp = imageLoader.execute(
+					ImageRequest.Builder(context).data(url).size(96, 54).build(),
+				).image?.toBitmap()
+				bmp?.let {
+					val c = extractEdgeColor(it)
+					themeColorCache[item.id] = c
+					withContext(Dispatchers.Main) { themeColor = c }
+				}
+			}
+		}
 	}
 
 	// The remote's BACK key must NEVER drop the user onto the TV launcher.
@@ -333,7 +371,14 @@ fun ArcticHomeScreen() {
 		}
 	}
 
-	BoxWithConstraints(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background).padding(top = 24.dp)) {
+	// 全屏按当前海报主题色做渐变底（大舞台、海报下方空隙、左侧 L 空间都染色）。
+	BoxWithConstraints(Modifier.fillMaxSize().background(
+		Brush.verticalGradient(
+			0.00f to themeColor.copy(alpha = 0.45f),
+			0.45f to themeColor.copy(alpha = 0.16f),
+			1.00f to JellyfinTheme.colorScheme.background,
+		),
+	).padding(top = 24.dp)) {
 		val screenHeight = maxHeight
 		// Netflix-style: the hero is the FIRST screen of one vertical scroll. It is NOT
 		// pinned — when you browse down, the whole page scrolls up and the hero glides
@@ -355,12 +400,15 @@ fun ArcticHomeScreen() {
 			scrollState = scrollState,
 			firstRowFocus = firstRowFocus,
 			selectedCategory = selectedCategory,
-			heroItem = heroItem,
-			heroCount = activeHeroCount,
-			heroIndex = if (selectedCategory == null) homeHeroIndex else categoryHeroIndex,
+			heroItem = activeItem,
+			themeColor = themeColor,
+			heroCount = browseList.size,
+			heroIndex = browseIndex,
 			onHeroIndexChange = { idx ->
-				if (selectedCategory == null) homeHeroIndex = idx else categoryHeroIndex = idx
+				browseIndex = idx
+				activeItem = browseList.getOrNull(idx)
 			},
+			onActiveItemChange = setActiveItem,
 			homeRows = homeRows,
 			categoryRows = categoryRows,
 			categoryLoading = categoryLoading,
@@ -387,10 +435,10 @@ fun ArcticHomeScreen() {
 			mainContentFocus = contentEntryFocus,
 			config = menuConfig,
 			onHome = {
-				if (selectedCategory != null) {
-					selectedCategory = null
-					homeScope.launch { runCatching { scrollState.scrollTo(0) } }
-				}
+				selectedCategory = null
+				activeItem = featuredItems.firstOrNull() ?: homeRows.firstOrNull()?.items?.firstOrNull()
+				browseIndex = 0
+				homeScope.launch { runCatching { scrollState.scrollTo(0) } }
 			},
 			onSearch = {
 				sidebarExpanded = false
@@ -614,9 +662,11 @@ private fun ArcticMainContent(
 	categoryLoading: Boolean,
 	loaded: Boolean,
 	heroLayoutMode: HeroLayoutMode,
+	themeColor: Color,
 	sidebarExpanded: Boolean,
 	sidebarMode: SidebarMode,
 	heroHeight: Dp,
+	onActiveItemChange: (BaseItemDto) -> Unit,
 	onItemClick: (BaseItemDto) -> Unit,
 	onHeroPlay: (BaseItemDto) -> Unit,
 	onHeroInfo: (BaseItemDto) -> Unit,
@@ -679,6 +729,7 @@ private fun ArcticMainContent(
 					.fillMaxWidth()
 					.height(stageHeight),
 				item = heroItem,
+				themeColor = themeColor,
 				featuredCount = heroCount,
 				heroIndex = heroIndex,
 				layoutMode = heroLayoutMode,
@@ -699,16 +750,14 @@ private fun ArcticMainContent(
 			)
 		}
 
-		// Pull the first poster row up by one row: the hero is shortened and the
-		// bridge spacer is collapsed so the row sits right below the hero image,
-		// matching the FUSE homepage layout where rows begin high on the screen.
+		// 大舞台与首排海报之间的「空隙」用主题色渐变衔接，使整页视觉连续。
 		Box(
 			Modifier
 				.fillMaxWidth()
-				.height(0.dp)
+				.height(18.dp)
 				.background(
 					Brush.verticalGradient(
-						0.00f to JellyfinTheme.colorScheme.background,
+						0.00f to themeColor.copy(alpha = 0.35f),
 						1.00f to Color.Transparent,
 					),
 				),
@@ -758,6 +807,7 @@ private fun ArcticMainContent(
 					title = row.title,
 					items = row.items,
 					layoutMode = mode,
+					onPosterFocus = onActiveItemChange,
 					onLayoutModeChange = { newMode ->
 						setRowModes(rowModes.toMutableMap().apply { put(row.title, newMode) })
 					},
@@ -795,6 +845,37 @@ private fun buildHeroMeta(item: BaseItemDto?): String = buildString {
 	if (!genres.isNullOrBlank()) append(genres)
 }
 
+/**
+ * 从背景图边缘采样像素估算「主题色 / 边缘色」：优先取更鲜艳（高饱和）的边缘像素，
+ * 得到适合做大舞台与空隙渐变的颜色。纯 Android API，不依赖额外库。
+ */
+private fun extractEdgeColor(bmp: Bitmap): Color {
+	val w = bmp.width
+	val h = bmp.height
+	if (w <= 0 || h <= 0) return Color(0xFF1A1D24)
+	val xMax = maxOf(1, (w * 0.20).toInt())
+	val yMax = maxOf(1, (h * 0.30).toInt())
+	var r = 0.0; var g = 0.0; var b = 0.0; var wsum = 0.0
+	fun sample(x: Int, y: Int) {
+		val p = bmp.getPixel(x, y)
+		val cr = (p shr 16) and 0xFF
+		val cg = (p shr 8) and 0xFF
+		val cb = p and 0xFF
+		val max = if (cr >= cg && cr >= cb) cr else if (cg >= cb) cg else cb
+		val min = if (cr <= cg && cr <= cb) cr else if (cg <= cb) cg else cb
+		val sat = if (max == 0) 0.0 else (max - min).toDouble() / max
+		val weight = 0.25 + sat
+		r += cr * weight; g += cg * weight; b += cb * weight; wsum += weight
+	}
+	for (x in 0 until xMax) for (y in 0 until h) sample(x, y)
+	for (y in h - yMax until h) for (x in 0 until w) sample(x, y)
+	if (wsum <= 0.0) return Color(0xFF1A1D24)
+	val rr = (r / wsum).roundToInt().coerceIn(0, 255)
+	val gg = (g / wsum).roundToInt().coerceIn(0, 255)
+	val bb = (b / wsum).roundToInt().coerceIn(0, 255)
+	return Color(255, rr, gg, bb)
+}
+
 // endregion
 
 // region Rows
@@ -804,6 +885,7 @@ private fun ArcticRowView(
 	title: String,
 	items: List<BaseItemDto>,
 	layoutMode: RowLayoutMode,
+	onPosterFocus: (BaseItemDto) -> Unit,
 	onLayoutModeChange: (RowLayoutMode) -> Unit,
 	onItemClick: (BaseItemDto) -> Unit,
 	onMore: () -> Unit,
@@ -826,7 +908,7 @@ private fun ArcticRowView(
 	BoxWithConstraints(
 		Modifier
 			.fillMaxWidth()
-			.padding(top = 18.dp, bottom = 6.dp)
+			.padding(top = 18.dp, bottom = 28.dp)
 			.onGloballyPositioned { coords ->
 				rowY = (coords.positionInWindow().y - containerY + scrollState.value).roundToInt()
 			}
@@ -910,6 +992,7 @@ private fun ArcticRowView(
 							item = items[index],
 							onClick = { onItemClick(items[index]) },
 							onLongPress = { onLayoutModeChange(layoutMode.next) },
+							onPosterFocus = { onPosterFocus(items[index]) },
 							modifier = extra,
 							width = cardWidth,
 						)
@@ -917,6 +1000,7 @@ private fun ArcticRowView(
 							item = items[index],
 							onClick = { onItemClick(items[index]) },
 							onLongPress = { onLayoutModeChange(layoutMode.next) },
+							onPosterFocus = { onPosterFocus(items[index]) },
 							modifier = extra,
 							width = cardWidth,
 						)
@@ -1000,6 +1084,7 @@ private fun PortraitPosterCard(
 	modifier: Modifier = Modifier,
 	width: Dp = 200.dp,
 	onLongPress: () -> Unit = {},
+	onPosterFocus: () -> Unit = {},
 ) {
 	val api = koinInject<ApiClient>()
 	val image = item.itemImages.values.firstOrNull() ?: item.itemBackdropImages.firstOrNull()
@@ -1012,7 +1097,10 @@ private fun PortraitPosterCard(
 	Column(
 		modifier = modifier
 			.width(width)
-			.onFocusChanged { focused = it.hasFocus }
+			.onFocusChanged {
+			focused = it.hasFocus
+			if (it.hasFocus) onPosterFocus()
+		}
 			.clickable(onClick = onClick)
 			.onKeyEvent { ev ->
 				val isSelect = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
@@ -1082,6 +1170,7 @@ private fun LandscapeCard(
 	modifier: Modifier = Modifier,
 	width: Dp = 300.dp,
 	onLongPress: () -> Unit = {},
+	onPosterFocus: () -> Unit = {},
 ) {
 	val api = koinInject<ApiClient>()
 	val image = item.itemBackdropImages.firstOrNull() ?: item.itemImages.values.firstOrNull()
@@ -1093,7 +1182,10 @@ private fun LandscapeCard(
 	Column(
 		modifier = modifier
 			.width(width)
-			.onFocusChanged { focused = it.hasFocus }
+			.onFocusChanged {
+			focused = it.hasFocus
+			if (it.hasFocus) onPosterFocus()
+		}
 			.clickable(onClick = onClick)
 			.onKeyEvent { ev ->
 				val isSelect = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter

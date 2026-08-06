@@ -93,12 +93,13 @@ import org.koin.compose.koinInject
  *     selected.
  */
 @Composable
-fun ArcticHeroStage(
+	fun ArcticHeroStage(
 	modifier: Modifier = Modifier,
 	item: BaseItemDto?,
 	featuredCount: Int,
 	heroIndex: Int,
 	layoutMode: HeroLayoutMode,
+	themeColor: Color,
 	onPlay: () -> Unit,
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
@@ -137,6 +138,7 @@ fun ArcticHeroStage(
 			scale = artScale,
 			lightX = light,
 			glow = glow,
+			themeColor = themeColor,
 			// Showcase dims harder so the cast collage reads on top of the art.
 			extraDim = if (layoutMode == HeroLayoutMode.SHOWCASE_COLLAGE) 0.22f else 0f,
 			// The mini strip is short: a full-height feather would erase the art.
@@ -224,6 +226,7 @@ private fun HeroArtLayer(
 	scale: Float,
 	lightX: Float,
 	glow: Float,
+	themeColor: Color,
 	extraDim: Float,
 	featherBottom: Float,
 ) {
@@ -232,7 +235,8 @@ private fun HeroArtLayer(
 	val backdrop: JellyfinImage? = item?.itemBackdropImages?.firstOrNull()
 		?: item?.itemImages?.values?.firstOrNull()
 
-	Box(Modifier.fillMaxSize().background(background)) {
+	// 大舞台底色用当前海报主题色，使整页随选中项染色（FUSE 主题色行为）。
+	Box(Modifier.fillMaxSize().background(themeColor.copy(alpha = 0.85f))) {
 		if (backdrop != null) {
 			AsyncImage(
 				url = backdrop.getUrl(api, maxWidth = 1920),
@@ -246,6 +250,23 @@ private fun HeroArtLayer(
 					},
 			)
 		}
+
+		// 0. 主题色整体渐变蒙版：大舞台随选中海报主题色变化。
+		Box(Modifier.fillMaxSize().background(
+			Brush.verticalGradient(
+				0.00f to themeColor.copy(alpha = 0.32f),
+				0.55f to themeColor.copy(alpha = 0.12f),
+				1.00f to Color.Transparent,
+			),
+		))
+		// 左侧详情蒙版渐变：左侧加蒙版，保证片名/简介可读且呼应主题色。
+		Box(Modifier.fillMaxSize().background(
+			Brush.horizontalGradient(
+				0.00f to themeColor.copy(alpha = 0.55f),
+				0.35f to themeColor.copy(alpha = 0.22f),
+				0.62f to Color.Transparent,
+			),
+		))
 
 		// 1. flixart feather - the artwork itself dissolves into the page.
 		Box(Modifier.fillMaxSize().background(FuseColors.artFeatherLeft(background, 0.90f)))
@@ -784,7 +805,7 @@ private fun HeroControlBar(
 			)
 		}
 
-		if (featuredCount > 1) {
+		if (featuredCount in 2..24) {
 			Row(
 				horizontalArrangement = Arrangement.spacedBy(6.dp),
 				verticalAlignment = Alignment.CenterVertically,
