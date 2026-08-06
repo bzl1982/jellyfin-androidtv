@@ -106,6 +106,8 @@ fun ArcticHeroStage(
 	onDown: () -> Unit,
 	onLeftEdge: () -> Unit,
 	playFocus: FocusRequester,
+	titleFocus: FocusRequester,
+	onTitleClick: () -> Unit,
 	scrollState: ScrollState,
 ) {
 	if (layoutMode == HeroLayoutMode.NO_STAGE) return
@@ -144,7 +146,7 @@ fun ArcticHeroStage(
 		when (layoutMode) {
 			HeroLayoutMode.FULL_BLEED_LEFT_INFO,
 			HeroLayoutMode.SLIDE_STAGE,
-			-> HeroStandard(
+			-> 			HeroStandard(
 				item = item,
 				featuredCount = featuredCount,
 				heroIndex = heroIndex,
@@ -157,6 +159,8 @@ fun ArcticHeroStage(
 				onLeftEdge = onLeftEdge,
 				onLight = { lightAnchor = it },
 				playFocus = playFocus,
+				titleFocus = titleFocus,
+				onTitleClick = onTitleClick,
 			)
 
 			HeroLayoutMode.SHOWCASE_COLLAGE -> HeroShowcase(
@@ -171,6 +175,8 @@ fun ArcticHeroStage(
 				onLeftEdge = onLeftEdge,
 				onLight = { lightAnchor = it },
 				playFocus = playFocus,
+				titleFocus = titleFocus,
+				onTitleClick = onTitleClick,
 			)
 
 			HeroLayoutMode.FANART_ONLY -> HeroFanart(
@@ -185,6 +191,8 @@ fun ArcticHeroStage(
 				onLeftEdge = onLeftEdge,
 				onLight = { lightAnchor = it },
 				playFocus = playFocus,
+				titleFocus = titleFocus,
+				onTitleClick = onTitleClick,
 			)
 
 			HeroLayoutMode.MINI_STAGE -> HeroMini(
@@ -199,6 +207,8 @@ fun ArcticHeroStage(
 				onLeftEdge = onLeftEdge,
 				onLight = { lightAnchor = it },
 				playFocus = playFocus,
+				titleFocus = titleFocus,
+				onTitleClick = onTitleClick,
 			)
 
 			HeroLayoutMode.NO_STAGE -> Unit
@@ -286,6 +296,8 @@ private fun HeroStandard(
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
+	titleFocus: FocusRequester,
+	onTitleClick: () -> Unit,
 ) {
 	Column(
 		modifier = Modifier
@@ -301,7 +313,7 @@ private fun HeroStandard(
 		Spacer(Modifier.weight(1f))
 
 		Column(verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp)) {
-			HeroTitle(item, if (compact) 32.sp else 46.sp)
+			HeroTitle(item, if (compact) 32.sp else 46.sp, titleFocus, onTitleClick, playFocus)
 			HeroMetaLine(item)
 			if (!compact) {
 				item?.overview?.let { overview ->
@@ -330,6 +342,7 @@ private fun HeroStandard(
 			onLeftEdge = onLeftEdge,
 			onLight = onLight,
 			playFocus = playFocus,
+			titleFocus = titleFocus,
 		)
 	}
 }
@@ -351,6 +364,8 @@ private fun HeroShowcase(
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
+	titleFocus: FocusRequester,
+	onTitleClick: () -> Unit,
 ) {
 	val api = koinInject<ApiClient>()
 
@@ -421,6 +436,8 @@ private fun HeroShowcase(
 			onLeftEdge = onLeftEdge,
 			onLight = onLight,
 			playFocus = playFocus,
+			titleFocus = titleFocus,
+			onTitleClick = onTitleClick,
 		)
 	}
 }
@@ -442,21 +459,44 @@ private fun HeroFanart(
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
+	titleFocus: FocusRequester,
+	onTitleClick: () -> Unit,
 ) {
 	Box(Modifier.fillMaxSize()) {
-		Text(
-			item?.name.orEmpty(),
-			color = FuseColors.mainFg90,
-			style = JellyfinTheme.typography.default.copy(
-				fontSize = 24.sp,
-				fontWeight = FontWeight.SemiBold,
-			),
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
+		var fanartTitleFocused by remember { mutableStateOf(false) }
+		Box(
 			modifier = Modifier
 				.align(Alignment.TopEnd)
-				.padding(top = 44.dp, end = 56.dp),
-		)
+				.padding(top = 44.dp, end = 56.dp)
+				.focusRequester(titleFocus)
+				.onFocusChanged { fanartTitleFocused = it.hasFocus }
+				.clickable(onClick = onTitleClick)
+				.onPreviewKeyEvent { event ->
+					if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+						playFocus.requestFocus()
+						true
+					} else {
+						false
+					}
+				}
+				.background(
+					if (fanartTitleFocused) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.18f)
+					else Color.Transparent,
+					RoundedCornerShape(6.dp),
+				)
+				.padding(horizontal = 8.dp, vertical = 4.dp),
+		) {
+			Text(
+				item?.name.orEmpty(),
+				color = if (fanartTitleFocused) JellyfinTheme.colorScheme.buttonFocused else FuseColors.mainFg90,
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 24.sp,
+					fontWeight = FontWeight.SemiBold,
+				),
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+		}
 
 		HeroControlBar(
 			modifier = Modifier
@@ -473,6 +513,7 @@ private fun HeroFanart(
 			onLeftEdge = onLeftEdge,
 			onLight = onLight,
 			playFocus = playFocus,
+			titleFocus = titleFocus,
 		)
 	}
 }
@@ -494,6 +535,8 @@ private fun HeroMini(
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
+	titleFocus: FocusRequester,
+	onTitleClick: () -> Unit,
 ) {
 	val api = koinInject<ApiClient>()
 	val poster = item?.itemImages?.values?.firstOrNull() ?: item?.itemBackdropImages?.firstOrNull()
@@ -525,7 +568,7 @@ private fun HeroMini(
 			modifier = Modifier.weight(1f),
 			verticalArrangement = Arrangement.spacedBy(8.dp),
 		) {
-			HeroTitle(item, 26.sp)
+			HeroTitle(item, 26.sp, titleFocus, onTitleClick, playFocus)
 			HeroMetaLine(item)
 		}
 
@@ -541,6 +584,7 @@ private fun HeroMini(
 			onLeftEdge = onLeftEdge,
 			onLight = onLight,
 			playFocus = playFocus,
+			titleFocus = titleFocus,
 		)
 	}
 }
@@ -550,17 +594,45 @@ private fun HeroMini(
 // region Shared pieces
 
 @Composable
-private fun HeroTitle(item: BaseItemDto?, size: androidx.compose.ui.unit.TextUnit) {
-	Text(
-		item?.name.orEmpty(),
-		color = FuseColors.mainFg100,
-		style = JellyfinTheme.typography.default.copy(
-			fontSize = size,
-			fontWeight = FontWeight.Bold,
-		),
-		maxLines = 2,
-		overflow = TextOverflow.Ellipsis,
-	)
+private fun HeroTitle(
+	item: BaseItemDto?,
+	size: androidx.compose.ui.unit.TextUnit,
+	titleFocus: FocusRequester,
+	onTitleClick: () -> Unit,
+	playFocus: FocusRequester,
+) {
+	var focused by remember { mutableStateOf(false) }
+	Box(
+		modifier = Modifier
+			.focusRequester(titleFocus)
+			.onFocusChanged { focused = it.hasFocus }
+			.clickable(onClick = onTitleClick)
+			.onPreviewKeyEvent { event ->
+				if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
+					playFocus.requestFocus()
+					true
+				} else {
+					false
+				}
+			}
+			.background(
+				if (focused) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.16f)
+				else Color.Transparent,
+				RoundedCornerShape(6.dp),
+			)
+			.padding(horizontal = 8.dp, vertical = 4.dp),
+	) {
+		Text(
+			item?.name.orEmpty(),
+			color = if (focused) JellyfinTheme.colorScheme.buttonFocused else FuseColors.mainFg100,
+			style = JellyfinTheme.typography.default.copy(
+				fontSize = size,
+				fontWeight = FontWeight.Bold,
+			),
+			maxLines = 2,
+			overflow = TextOverflow.Ellipsis,
+		)
+	}
 }
 
 @Composable
@@ -633,6 +705,7 @@ private fun HeroControlBar(
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
+	titleFocus: FocusRequester,
 ) {
 	val showArrows = featuredCount > 1
 	val playSize = if (compact) 52.dp else 68.dp
@@ -646,9 +719,15 @@ private fun HeroControlBar(
 		modifier = modifier
 			.focusGroup()
 			.onPreviewKeyEvent { event ->
-				if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionDown) {
-					onDown()
-					true
+				if (event.type == KeyEventType.KeyDown) {
+					when (event.key) {
+						Key.DirectionDown -> { onDown(); true }
+						// Pressing UP from any control parks on the (now focusable)
+						// title above the control bar - that is where the remote can
+						// step up to see the full poster via the detail page.
+						Key.DirectionUp -> { titleFocus.requestFocus(); true }
+						else -> false
+					}
 				} else {
 					false
 				}

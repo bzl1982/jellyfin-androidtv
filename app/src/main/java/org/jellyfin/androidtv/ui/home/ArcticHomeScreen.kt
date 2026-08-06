@@ -28,6 +28,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -122,12 +125,6 @@ enum class RowLayoutMode {
 	LANDSCAPE,
 }
 
-private val RowLayoutMode.label: String
-	get() = when (this) {
-		RowLayoutMode.PORTRAIT -> "竖屏"
-		RowLayoutMode.LANDSCAPE -> "横幅"
-	}
-
 private val RowLayoutMode.next: RowLayoutMode
 	get() = when (this) {
 		RowLayoutMode.PORTRAIT -> RowLayoutMode.LANDSCAPE
@@ -148,6 +145,9 @@ fun ArcticHomeScreen() {
 	var featuredItems by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
 	var homeRows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
 	var loaded by remember { mutableStateOf(false) }
+	// Full-screen poster wall opened from a row's 「更多」button. While set it
+	// covers the whole screen; BACK closes it (never the app).
+	var posterWall by remember { mutableStateOf<Pair<String, List<BaseItemDto>>?>(null) }
 
 	var selectedCategory by remember { mutableStateOf<CategoryMenuConfig?>(null) }
 	var categoryHeroItems by remember { mutableStateOf<List<BaseItemDto>>(emptyList()) }
@@ -311,8 +311,11 @@ fun ArcticHomeScreen() {
 	// simply re-arms focus on the big stage's play button - it is always
 	// swallowed, so the app can only be left with the TV's own HOME key.
 	BackHandler(enabled = true) {
-		if (selectedCategory != null) selectedCategory = null
-		backTick += 1
+		when {
+			posterWall != null -> posterWall = null
+			selectedCategory != null -> selectedCategory = null
+			else -> backTick += 1
+		}
 	}
 
 	BoxWithConstraints(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background).padding(top = 24.dp)) {
@@ -328,7 +331,10 @@ fun ArcticHomeScreen() {
 		val homeScope = rememberCoroutineScope()
 
 		// One scroll container holds hero + rows. The left sidebar stays as a fixed
-		// overlay on top so it is always reachable.
+		// overlay on top so it is always reachable. While the full-screen poster
+		// wall is open we skip composing the home content entirely, so its
+		// (covered) focusables can't steal the remote at the wall's edges.
+		if (posterWall == null) {
 		ArcticMainContent(
 			modifier = Modifier.fillMaxSize(),
 			scrollState = scrollState,
@@ -351,6 +357,7 @@ fun ArcticHomeScreen() {
 			onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
 			onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
 			onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
+			onRowMore = { title, items -> posterWall = title to items },
 			initialFocus = mainContentFocus,
 			homeSidebarFocus = homeSidebarFocus,
 			categorySidebarFocus = categorySidebarFocus,
@@ -383,7 +390,18 @@ fun ArcticHomeScreen() {
 					Toast.makeText(context, "正在加载 ${cat.label}", Toast.LENGTH_SHORT).show()
 				}
 			},
-		)
+		}
+
+		// Full-screen poster wall opened from a row's 「更多」. It covers the home
+		// content and the rail; BACK (handled above) closes it, never the app.
+		posterWall?.let { (pwTitle, pwItems) ->
+			ArcticPosterWallScreen(
+				title = pwTitle,
+				items = pwItems,
+				onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
+				onBack = { posterWall = null },
+			)
+		}
 	}
 
 	// Entering the screen, and every BACK press, parks the remote on the big
@@ -584,6 +602,7 @@ private fun ArcticMainContent(
 	onItemClick: (BaseItemDto) -> Unit,
 	onHeroPlay: (BaseItemDto) -> Unit,
 	onHeroInfo: (BaseItemDto) -> Unit,
+	onRowMore: (String, List<BaseItemDto>) -> Unit,
 	initialFocus: FocusRequester,
 	homeSidebarFocus: FocusRequester,
 	categorySidebarFocus: FocusRequester,
@@ -618,6 +637,7 @@ private fun ArcticMainContent(
 	// LEFT on the leftmost hero control returns to the rail entry that matches
 	// the current view, same rule the poster rows follow.
 	val heroSidebarFocus = if (selectedCategory == null) homeSidebarFocus else categorySidebarFocus
+	val heroTitleFocus = remember { FocusRequester() }
 
 	Column(
 		Modifier
@@ -655,6 +675,8 @@ private fun ArcticMainContent(
 				onDown = { runCatching { firstRowFocus.requestFocus() } },
 				onLeftEdge = { runCatching { heroSidebarFocus.requestFocus() } },
 				playFocus = initialFocus,
+				titleFocus = heroTitleFocus,
+				onTitleClick = { heroItem?.let(onHeroInfo) },
 				scrollState = scrollState,
 			)
 		}
@@ -721,6 +743,7 @@ private fun ArcticMainContent(
 						setRowModes(rowModes.toMutableMap().apply { put(row.title, newMode) })
 					},
 					onItemClick = onItemClick,
+					onMore = { onRowMore(row.title, row.items) },
 					index = index,
 					isFirstRow = index == 0,
 					heroFocus = initialFocus,
@@ -764,6 +787,7 @@ private fun ArcticRowView(
 	layoutMode: RowLayoutMode,
 	onLayoutModeChange: (RowLayoutMode) -> Unit,
 	onItemClick: (BaseItemDto) -> Unit,
+	onMore: () -> Unit,
 	index: Int,
 	isFirstRow: Boolean,
 	heroFocus: FocusRequester,
@@ -825,19 +849,56 @@ private fun ArcticRowView(
 					.background(JellyfinTheme.colorScheme.buttonFocused, RoundedCornerShape(2.dp)),
 			)
 			Spacer(Modifier.width(10.dp))
-			Text(
-				title,
-				color = JellyfinTheme.colorScheme.listHeader,
-				style = JellyfinTheme.typography.default.copy(
-					fontWeight = FontWeight.Bold,
-					fontSize = 19.sp,
-				),
-			)
+			// The row title itself is the display-mode toggle: click / select it to
+			// flip between 竖屏 and 横幅. The old top-right switch is gone — that
+			// slot is now the 「更多」entry into the full poster wall.
+			var titleFocused by remember { mutableStateOf(false) }
+			Box(
+				Modifier
+					.onFocusChanged { titleFocused = it.hasFocus }
+					.clickable { onLayoutModeChange(layoutMode.next) }
+					.background(
+						if (titleFocused) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.18f)
+						else Color.Transparent,
+						RoundedCornerShape(6.dp),
+					)
+					.padding(horizontal = 8.dp, vertical = 4.dp),
+			) {
+				Text(
+					title,
+					color = if (titleFocused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.listHeader,
+					style = JellyfinTheme.typography.default.copy(
+						fontWeight = FontWeight.Bold,
+						fontSize = 19.sp,
+					),
+				)
+			}
 			Spacer(Modifier.weight(1f))
-			RowLayoutModeSwitch(
-				current = layoutMode,
-				onChange = onLayoutModeChange,
-			)
+			// 「更多」→ 该目录的全屏海报墙（带 地区 / 影片类型 标签筛选）
+			var moreFocused by remember { mutableStateOf(false) }
+			Box(
+				Modifier
+					.height(34.dp)
+					.onFocusChanged { moreFocused = it.hasFocus }
+					.clickable(onClick = onMore)
+					.background(
+						if (moreFocused) JellyfinTheme.colorScheme.buttonFocused
+						else JellyfinTheme.colorScheme.surface.copy(alpha = 0.40f),
+						RoundedCornerShape(8.dp),
+					)
+					.padding(horizontal = 14.dp),
+				contentAlignment = Alignment.Center,
+			) {
+				Text(
+					"更多",
+					color = if (moreFocused) JellyfinTheme.colorScheme.onButtonFocused
+						else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.8f),
+					style = JellyfinTheme.typography.default.copy(
+						fontSize = 13.sp,
+						fontWeight = FontWeight.SemiBold,
+					),
+				)
+			}
 		}
 
 		LazyRow(
@@ -879,49 +940,6 @@ private fun ArcticRowView(
 		}
 	}
 }
-}
-
-@Composable
-private fun RowLayoutModeSwitch(
-	current: RowLayoutMode,
-	onChange: (RowLayoutMode) -> Unit,
-) {
-	var focused by remember { mutableStateOf(false) }
-
-	Row(
-		modifier = Modifier
-			.height(32.dp)
-			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused
-				else JellyfinTheme.colorScheme.surface.copy(alpha = 0.40f),
-				RoundedCornerShape(8.dp),
-			)
-			.onFocusChanged { focused = it.hasFocus }
-			.clickable { onChange(current.next) }
-			.padding(horizontal = 10.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(6.dp),
-	) {
-		Text(
-			current.label,
-			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
-				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
-			style = JellyfinTheme.typography.default.copy(
-				fontSize = 12.sp,
-				fontWeight = FontWeight.SemiBold,
-			),
-			maxLines = 1,
-		)
-		Text(
-			"⇄",
-			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
-				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-			style = JellyfinTheme.typography.default.copy(
-				fontSize = 12.sp,
-				fontWeight = FontWeight.Bold,
-			),
-		)
-	}
 }
 
 @Composable
@@ -1045,5 +1063,127 @@ private fun LandscapeCard(
 
 private val view_side_dp = 88.dp
 private val view_pad_dp = 24.dp
+
+// region Full-screen poster wall (「更多」)
+
+/**
+ * Opened from a row's 「更多」button. Shows that row's items as a full-screen
+ * wall of portrait posters (7 per row) with tag filters at the top:
+ * 全部 / 影片类型(genre) / 地区(productionLocations). Selecting a tag narrows the
+ * wall. BACK (handled by the home screen's BackHandler) closes it.
+ */
+@Composable
+private fun ArcticPosterWallScreen(
+	title: String,
+	items: List<BaseItemDto>,
+	onItemClick: (BaseItemDto) -> Unit,
+	onBack: () -> Unit,
+) {
+	val background = JellyfinTheme.colorScheme.background
+	val gap = 16.dp
+
+	data class Chip(val label: String, val match: (BaseItemDto) -> Boolean)
+	val chips = remember(items) {
+		buildList {
+			add(Chip("全部") { true })
+			items.flatMap { it.genres.orEmpty() }.toSet().forEach { g ->
+				add(Chip(g) { it.genres?.contains(g) == true })
+			}
+			items.flatMap { it.productionLocations.orEmpty() }.toSet().forEach { r ->
+				add(Chip(r) { it.productionLocations?.contains(r) == true })
+			}
+		}
+	}
+	var selected by remember { mutableStateOf(0) }
+	val filtered = remember(selected, items) { chips[selected].match.let { m -> items.filter(m) } }
+	val gridFirstFocus = remember { FocusRequester() }
+
+	Box(Modifier.fillMaxSize().background(background)) {
+		Column(Modifier.fillMaxSize()) {
+			// 顶部：标题 + 标签筛选
+			Column(Modifier.padding(start = 40.dp, end = 40.dp, top = 28.dp, bottom = 14.dp)) {
+				Text(
+					title,
+					color = JellyfinTheme.colorScheme.listHeader,
+					style = JellyfinTheme.typography.default.copy(fontWeight = FontWeight.Bold, fontSize = 30.sp),
+				)
+				Spacer(Modifier.height(14.dp))
+				LazyRow(
+					horizontalArrangement = Arrangement.spacedBy(10.dp),
+					contentPadding = PaddingValues(vertical = 4.dp),
+				) {
+					itemsIndexed(chips) { idx, chip ->
+						val sel = idx == selected
+						var f by remember { mutableStateOf(false) }
+						Box(
+							Modifier
+								.onFocusChanged { f = it.hasFocus }
+								.clickable {
+									selected = idx
+									runCatching { gridFirstFocus.requestFocus() }
+								}
+								.background(
+									if (sel) JellyfinTheme.colorScheme.buttonFocused
+									else JellyfinTheme.colorScheme.surface.copy(alpha = 0.40f),
+									RoundedCornerShape(8.dp),
+								)
+								.padding(horizontal = 14.dp, vertical = 9.dp),
+							contentAlignment = Alignment.Center,
+						) {
+							Text(
+								chip.label,
+								color = if (sel) JellyfinTheme.colorScheme.onButtonFocused
+									else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.8f),
+								style = JellyfinTheme.typography.default.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+								maxLines = 1,
+							)
+						}
+					}
+				}
+			}
+
+			// 海报墙：一排 7 个竖屏海报
+			BoxWithConstraints(
+				Modifier.fillMaxSize().padding(start = 40.dp, end = 40.dp, bottom = 28.dp),
+			) {
+				val available = maxWidth
+				val count = 7f
+				val cardWidth = (available - gap * (count - 1f)) / count
+				if (filtered.isEmpty()) {
+					Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+						Text(
+							"无内容",
+							color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+							style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
+						)
+					}
+				} else {
+					LazyVerticalGrid(
+						columns = GridCells.Fixed(7),
+						horizontalArrangement = Arrangement.spacedBy(gap),
+						verticalArrangement = Arrangement.spacedBy(gap + 10.dp),
+						contentPadding = PaddingValues(vertical = 8.dp),
+						modifier = Modifier.fillMaxSize().focusRestorer(),
+					) {
+						gridItemsIndexed(filtered, key = { _, it -> it.id }) { idx, item ->
+							PortraitPosterCard(
+								item = item,
+								onClick = { onItemClick(item) },
+								modifier = if (idx == 0) Modifier.focusRequester(gridFirstFocus) else Modifier,
+								width = cardWidth,
+							)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 进入海报墙 + 每次切换标签后，焦点落到首张海报
+	LaunchedEffect(selected) {
+		delay(80)
+		runCatching { gridFirstFocus.requestFocus() }
+	}
+}
 
 // endregion
