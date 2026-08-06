@@ -1605,7 +1605,7 @@ private fun HeroPillButton(
 	Row(
 		modifier = Modifier
 			.then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-			.then(if (canFocus) Modifier.focusRestorer() else Modifier.focusProperties { canFocus = false })
+			.then(if (canFocus) Modifier.focusRestorer() else Modifier.focusProperties { this.canFocus = false })
 			.height(44.dp)
 			.background(bg, shape)
 			.border(
