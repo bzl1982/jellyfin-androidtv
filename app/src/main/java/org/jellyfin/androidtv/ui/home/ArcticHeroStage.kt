@@ -32,8 +32,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -103,7 +105,7 @@ fun ArcticHeroStage(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
-	onDown: () -> Unit,
+	onDown: () -> Boolean,
 	onLeftEdge: () -> Unit,
 	playFocus: FocusRequester,
 	titleFocus: FocusRequester,
@@ -292,7 +294,7 @@ private fun HeroStandard(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
-	onDown: () -> Unit,
+	onDown: () -> Boolean,
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
@@ -360,7 +362,7 @@ private fun HeroShowcase(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
-	onDown: () -> Unit,
+	onDown: () -> Boolean,
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
@@ -455,7 +457,7 @@ private fun HeroFanart(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
-	onDown: () -> Unit,
+	onDown: () -> Boolean,
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
@@ -531,7 +533,7 @@ private fun HeroMini(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
-	onDown: () -> Unit,
+	onDown: () -> Boolean,
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
@@ -701,7 +703,7 @@ private fun HeroControlBar(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
-	onDown: () -> Unit,
+	onDown: () -> Boolean,
 	onLeftEdge: () -> Unit,
 	onLight: (Float) -> Unit,
 	playFocus: FocusRequester,
@@ -721,7 +723,14 @@ private fun HeroControlBar(
 			.onPreviewKeyEvent { event ->
 				if (event.type == KeyEventType.KeyDown) {
 					when (event.key) {
-						Key.DirectionDown -> { onDown(); true }
+						Key.DirectionDown -> {
+							// The explicit anchor (first-row poster) may not be bound
+							// yet (e.g. a still-composing or empty first row). If that
+							// request fails, fall back to the system's natural down-search
+							// so the remote never gets trapped inside the control bar.
+							if (!onDown()) LocalFocusManager.current.moveFocus(FocusDirection.Down)
+							true
+						}
 						// Pressing UP from any control parks on the (now focusable)
 						// title above the control bar - that is where the remote can
 						// step up to see the full poster via the detail page.

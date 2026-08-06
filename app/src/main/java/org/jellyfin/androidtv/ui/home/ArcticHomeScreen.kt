@@ -690,7 +690,7 @@ private fun ArcticMainContent(
 				onPreviousFeatured = {
 					if (heroCount > 0) onHeroIndexChange((heroIndex - 1 + heroCount) % heroCount)
 				},
-				onDown = { runCatching { firstRowFocus.requestFocus() } },
+				onDown = { runCatching { firstRowFocus.requestFocus() }.getOrDefault(false) },
 				onLeftEdge = { runCatching { heroSidebarFocus.requestFocus() } },
 				playFocus = initialFocus,
 				titleFocus = heroTitleFocus,
