@@ -49,6 +49,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -1217,6 +1218,7 @@ private fun HeroMiniStage(
 	}
 }
 
+@Composable
 private fun HeroMetaRow(item: BaseItemDto?) {
 	Row(
 		horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1474,7 +1476,7 @@ private fun ArcticRowView(
 				rowY = (coords.positionInWindow().y - containerY + scrollState.value).roundToInt()
 			}
 			.onFocusChanged { focused ->
-				if (focused) {
+				if (focused.isFocused) {
 					scope.launch {
 						runCatching { scrollState.animateScrollTo((rowY - 24).coerceAtLeast(0)) }
 					}
