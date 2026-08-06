@@ -1564,6 +1564,7 @@ private fun ArcticRowView(
 	}
 }
 
+@Composable
 private fun RowLayoutModeSwitch(
 	current: RowLayoutMode,
 	onChange: (RowLayoutMode) -> Unit,
