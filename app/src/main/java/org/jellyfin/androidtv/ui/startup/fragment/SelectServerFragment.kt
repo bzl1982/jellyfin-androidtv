@@ -6,205 +6,107 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.view.isVisible
+import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
-import androidx.fragment.app.add
 import androidx.fragment.app.commit
-import androidx.fragment.app.replace
-import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
-import androidx.recyclerview.widget.RecyclerView
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.BuildConfig
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.auth.model.ConnectedState
-import org.jellyfin.androidtv.auth.model.ConnectingState
 import org.jellyfin.androidtv.auth.model.Server
-import org.jellyfin.androidtv.auth.model.ServerAdditionState
 import org.jellyfin.androidtv.auth.model.UnableToConnectState
+import org.jellyfin.androidtv.data.model.AppNotification
 import org.jellyfin.androidtv.data.repository.NotificationsRepository
 import org.jellyfin.androidtv.databinding.FragmentSelectServerBinding
-import org.jellyfin.androidtv.ui.ServerButtonView
-import org.jellyfin.androidtv.ui.SpacingItemDecoration
+import org.jellyfin.androidtv.ui.ServerButton
+import org.jellyfin.androidtv.ui.base.CircularProgressIndicator
+import org.jellyfin.androidtv.ui.base.FuseColors
+import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
+import org.jellyfin.androidtv.ui.base.button.ButtonDefaults
 import org.jellyfin.androidtv.ui.startup.StartupViewModel
-import org.jellyfin.androidtv.util.ListAdapter
-import org.jellyfin.androidtv.util.MenuBuilder
 import org.jellyfin.androidtv.util.createBundle
 import org.jellyfin.androidtv.util.getSummary
 import org.koin.androidx.viewmodel.ext.android.activityViewModel
 import org.koin.compose.koinInject
+import java.util.UUID
 
 class SelectServerFragment : Fragment() {
 	private var _binding: FragmentSelectServerBinding? = null
 	private val binding get() = _binding!!
 	private val startupViewModel: StartupViewModel by activityViewModel()
 
-	@Suppress("LongMethod")
-	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? {
+	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
 		_binding = FragmentSelectServerBinding.inflate(inflater, container, false)
 
-		// Create spacing for recycler view of 8dp
-		@Suppress("MagicNumber")
-		val serverDivider = SpacingItemDecoration(0, 8)
+		binding.composeView.setContent {
+			JellyfinTheme {
+				val stored by startupViewModel.storedServers.collectAsState()
+				val discovered by startupViewModel.discoveredServers.collectAsState()
+				var discoveryLoading by remember { mutableStateOf(true) }
+				val notificationsRepository = koinInject<NotificationsRepository>()
+				val notifications by notificationsRepository.notifications.collectAsState()
 
-		// Stored servers
-		val storedServerAdapter = ServerAdapter(
-			serverClickListener = { (_, server) ->
-				requireActivity()
-					.supportFragmentManager
-					.commit {
-						replace<StartupToolbarFragment>(R.id.content_view)
-						add<ServerFragment>(
-							R.id.content_view,
-							null,
-							createBundle {
-								putString(ServerFragment.ARG_SERVER_ID, server.id.toString())
-							}
-						)
-						addToBackStack(null)
-					}
-			},
-			serverPopupBuilder = { server ->
-				item(getString(R.string.lbl_remove)) {
-					startupViewModel.deleteServer(server.id)
+				// Hide the discovery spinner once the first real scan result arrives.
+				LaunchedEffect(Unit) {
+					startupViewModel.discoveredServers.drop(1).collect { discoveryLoading = false }
 				}
-			}
-		)
-		binding.storedServers.setHasFixedSize(true)
-		binding.storedServers.addItemDecoration(serverDivider)
-		binding.storedServers.adapter = storedServerAdapter
 
-		// Discovery
-		binding.discoveryServers.setHasFixedSize(true)
-		binding.discoveryServers.addItemDecoration(serverDivider)
-		val discoveryServerAdapter = ServerAdapter(
-			serverClickListener = { (_, server) ->
-				startupViewModel.addServer(server.address).onEach { state ->
-					if (state is ConnectedState) {
-						parentFragmentManager.commit {
-							replace<StartupToolbarFragment>(R.id.content_view)
-							add<ServerFragment>(
-								R.id.content_view,
-								null,
-								createBundle {
-									putString(ServerFragment.ARG_SERVER_ID, state.id.toString())
-								}
-							)
-						}
-					} else {
-						items = items.map {
-							if (it.server.id == server.id) StatefulServer(state, it.server)
-							else it
-						}
-
-						// Show error as toast
-						if (state is UnableToConnectState) {
-							Toast.makeText(
-								requireContext(),
-								getString(
-									R.string.server_connection_failed_candidates,
-									state.addressCandidates
-										.map { "${it.key} ${it.value.getSummary(requireContext())}" }
-										.joinToString(prefix = "\n", separator = "\n")
-								),
-								Toast.LENGTH_LONG,
-							).show()
-						}
-					}
-				}.launchIn(lifecycleScope)
-			}
-		)
-		binding.discoveryServers.adapter = discoveryServerAdapter
-
-		viewLifecycleOwner.lifecycleScope.launch {
-			viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-				binding.discoveryProgressIndicator.isVisible = true
-				binding.discoveryServers.isVisible = true
-				binding.discoveryServers.isFocusable = false
-
-				startupViewModel.storedServers.onEach { servers ->
-					storedServerAdapter.items = servers.map { StatefulServer(server = it) }
-
-					binding.storedServersTitle.isVisible = servers.isNotEmpty()
-					binding.storedServers.isVisible = servers.isNotEmpty()
-					binding.storedServers.isFocusable = servers.isNotEmpty()
-					binding.welcomeTitle.isVisible = servers.isEmpty()
-					binding.welcomeContent.isVisible = servers.isEmpty()
-
-					// Make sure focus is properly set when no servers exist
-					if (servers.isEmpty()) binding.enterServerAddress.requestFocus()
-				}.launchIn(this)
-
-				startupViewModel.discoveredServers.onEach { servers ->
-					discoveryServerAdapter.items = servers.map { StatefulServer(server = it) }
-
-					binding.discoveryServers.isFocusable = servers.any()
-					binding.discoveryServers.isVisible = discoveryServerAdapter.itemCount > 0
-					binding.discoveryNoneFound.isVisible = discoveryServerAdapter.itemCount == 0
-				}.launchIn(this)
-
-				binding.discoveryProgressIndicator.isVisible = false
+				SelectServerScreen(
+					storedServers = stored,
+					discoveredServers = discovered,
+					discoveryLoading = discoveryLoading,
+					notifications = notifications.filter { it.public },
+					onStoredServerClick = { server -> navigateToServer(server.id) },
+					onStoredServerLongClick = { server ->
+						startupViewModel.deleteServer(server.id)
+						Toast.makeText(
+							requireContext(),
+							getString(R.string.server_removed, server.name.ifBlank { server.address }),
+							Toast.LENGTH_SHORT,
+						).show()
+					},
+					onDiscoveryServerClick = { server -> addDiscoveryServer(server) },
+					onManualAddClick = { navigateToServerAdd() },
+				)
 			}
 		}
 
-		// Notifications
-		binding.notifications.setContent {
-			val notificationsRepository = koinInject<NotificationsRepository>()
-			val notifications by notificationsRepository.notifications.collectAsState()
-
-			Column(
-				verticalArrangement = Arrangement.spacedBy(5.dp)
-			) {
-				for (notification in notifications) {
-					if (!notification.public) continue
-
-					Box(
-						modifier = Modifier
-							.fillMaxWidth()
-							.clip(JellyfinTheme.shapes.medium)
-							.background(colorResource(id = R.color.lb_basic_card_info_bg_color)),
-					) {
-						Text(
-							text = notification.message,
-							modifier = Modifier.padding(10.dp),
-							color = colorResource(id = R.color.white),
-						)
-					}
-				}
-			}
-		}
-
-		// Manual
-		binding.enterServerAddress.setOnClickListener {
-			parentFragmentManager.commit {
-				addToBackStack(null)
-				replace<ServerAddFragment>(R.id.content_view)
-			}
-		}
-
-		// App info
-		@Suppress("SetTextI18n")
-		binding.appVersion.text = "lorla-androidtv ${BuildConfig.VERSION_NAME} ${BuildConfig.BUILD_TYPE}"
-
-		// Set focus to fragment
 		binding.root.requestFocus()
-
 		return binding.root
 	}
 
@@ -221,42 +123,262 @@ class SelectServerFragment : Fragment() {
 		startupViewModel.loadDiscoveryServers()
 	}
 
-	class ServerAdapter(
-		var serverClickListener: ServerAdapter.(statefulServer: StatefulServer) -> Unit = {},
-		var serverPopupBuilder: MenuBuilder.(server: Server) -> Unit = {},
-	) : ListAdapter<StatefulServer, ServerAdapter.ViewHolder>() {
-		override fun areItemsTheSame(old: StatefulServer, new: StatefulServer): Boolean = new.server == old.server
-
-		override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-			val view = ServerButtonView(parent.context).apply {
-				layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-			}
-			return ViewHolder(view)
+	private fun navigateToServer(serverId: UUID) {
+		requireActivity().supportFragmentManager.commit {
+			replace<StartupToolbarFragment>(R.id.content_view)
+			add<ServerFragment>(
+				R.id.content_view,
+				null,
+				createBundle {
+					putString(ServerFragment.ARG_SERVER_ID, serverId.toString())
+				},
+			)
+			addToBackStack(null)
 		}
-
-		override fun onBindViewHolder(holder: ViewHolder, statefulServer: StatefulServer) = with(holder.serverButtonView) {
-			val (serverState, server) = statefulServer
-
-			// Set data
-			name = server.name
-			address = server.address
-			version = server.version
-
-			state = when (serverState) {
-				is ConnectingState -> ServerButtonView.State.CONNECTING
-				is UnableToConnectState -> ServerButtonView.State.ERROR
-				else -> ServerButtonView.State.DEFAULT
-			}
-
-			// Set actions
-			setOnClickListener { serverClickListener(statefulServer) }
-			setPopupMenu { serverPopupBuilder(server) }
-		}
-
-		inner class ViewHolder(
-			val serverButtonView: ServerButtonView,
-		) : RecyclerView.ViewHolder(serverButtonView)
 	}
 
-	data class StatefulServer(val state: ServerAdditionState? = null, val server: Server)
+	private fun addDiscoveryServer(server: Server) {
+		startupViewModel.addServer(server.address).onEach { state ->
+			if (state is ConnectedState) {
+				parentFragmentManager.commit {
+					replace<StartupToolbarFragment>(R.id.content_view)
+					add<ServerFragment>(
+						R.id.content_view,
+						null,
+						createBundle {
+							putString(ServerFragment.ARG_SERVER_ID, state.id.toString())
+						},
+					)
+				}
+			} else if (state is UnableToConnectState) {
+				Toast.makeText(
+					requireContext(),
+					getString(
+						R.string.server_connection_failed_candidates,
+						state.addressCandidates
+							.map { "${it.key} ${it.value.getSummary(requireContext())}" }
+							.joinToString(prefix = "\n", separator = "\n"),
+					),
+					Toast.LENGTH_LONG,
+				).show()
+			}
+		}.launchIn(lifecycleScope)
+	}
+
+	private fun navigateToServerAdd() {
+		parentFragmentManager.commit {
+			addToBackStack(null)
+			replace<ServerAddFragment>(R.id.content_view)
+		}
+	}
+}
+
+@Composable
+private fun SelectServerScreen(
+	storedServers: List<Server>,
+	discoveredServers: List<Server>,
+	discoveryLoading: Boolean,
+	notifications: List<AppNotification>,
+	onStoredServerClick: (Server) -> Unit,
+	onStoredServerLongClick: (Server) -> Unit,
+	onDiscoveryServerClick: (Server) -> Unit,
+	onManualAddClick: () -> Unit,
+	modifier: Modifier = Modifier,
+) {
+	val accent = JellyfinTheme.colorScheme.rangeControlFill
+
+	Box(
+		modifier = modifier
+			.fillMaxSize()
+			.background(FuseColors.mainBg100),
+	) {
+		LazyColumn(
+			modifier = Modifier
+				.fillMaxSize()
+				.padding(horizontal = 56.dp, vertical = 40.dp),
+			verticalArrangement = Arrangement.spacedBy(14.dp),
+			contentPadding = PaddingValues(bottom = 40.dp),
+		) {
+			// Brand header
+			item {
+				Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+					Text(
+						text = "Lorla",
+						color = accent,
+						fontSize = 40.sp,
+						fontWeight = FontWeight.Bold,
+					)
+					Text(
+						text = stringResource(R.string.welcome_content),
+						color = FuseColors.mainFg50,
+						fontSize = 18.sp,
+					)
+				}
+			}
+
+			// Stored servers
+			if (storedServers.isNotEmpty()) {
+				item { SectionHeader(stringResource(R.string.saved_servers)) }
+				items(storedServers, key = { it.id }) { server ->
+					ServerCard(
+						server = server,
+						onClick = { onStoredServerClick(server) },
+						onLongClick = { onStoredServerLongClick(server) },
+					)
+				}
+			} else {
+				item {
+					Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+						Text(
+							text = stringResource(R.string.welcome_title),
+							color = FuseColors.mainFg100,
+							fontSize = 24.sp,
+							fontWeight = FontWeight.Medium,
+						)
+						Text(
+							text = stringResource(R.string.welcome_content),
+							color = FuseColors.mainFg50,
+							fontSize = 16.sp,
+						)
+					}
+				}
+			}
+
+			// Manual add
+			item { ManualAddButton(onClick = onManualAddClick) }
+
+			// Discovery
+			item {
+				Row(
+					verticalAlignment = Alignment.CenterVertically,
+					horizontalArrangement = Arrangement.spacedBy(12.dp),
+				) {
+					SectionHeader(stringResource(R.string.discovered_servers_title))
+					if (discoveryLoading) {
+						CircularProgressIndicator(Modifier.width(18.dp).height(18.dp))
+					}
+				}
+			}
+			if (discoveredServers.isNotEmpty()) {
+				items(discoveredServers, key = { it.id }) { server ->
+					ServerCard(
+						server = server,
+						onClick = { onDiscoveryServerClick(server) },
+					)
+				}
+			} else if (!discoveryLoading) {
+				item {
+					Text(
+						text = stringResource(R.string.discovered_servers_empty),
+						color = FuseColors.mainFg50,
+						fontSize = 16.sp,
+					)
+				}
+			}
+
+			// Notifications
+			if (notifications.isNotEmpty()) {
+				item { SectionHeader("通知") }
+				items(notifications) { notification ->
+					Box(
+						modifier = Modifier
+							.fillMaxWidth()
+							.clip(JellyfinTheme.shapes.medium)
+							.background(FuseColors.mainSoft)
+							.padding(12.dp),
+					) {
+						Text(
+							text = notification.message,
+							color = FuseColors.mainFg90,
+							fontSize = 14.sp,
+						)
+					}
+				}
+			}
+
+			// Footer
+			item {
+				Text(
+					text = "lorla-androidtv ${BuildConfig.VERSION_NAME} ${BuildConfig.BUILD_TYPE}",
+					color = FuseColors.mainFg25,
+					fontSize = 12.sp,
+				)
+			}
+		}
+	}
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+	Text(
+		text = text,
+		color = JellyfinTheme.colorScheme.rangeControlFill,
+		fontSize = 16.sp,
+		fontWeight = FontWeight.Medium,
+	)
+}
+
+@Composable
+private fun ServerCard(
+	server: Server,
+	onClick: () -> Unit,
+	onLongClick: (() -> Unit)? = null,
+	modifier: Modifier = Modifier,
+) {
+	val interactionSource = remember { MutableInteractionSource() }
+	val focused by interactionSource.collectIsFocusedAsState()
+	val accent = JellyfinTheme.colorScheme.rangeControlFill
+
+	Box(
+		modifier = modifier
+			.fillMaxWidth()
+			.border(
+				width = if (focused) 2.dp else 0.dp,
+				color = accent,
+				shape = ButtonDefaults.Shape,
+			),
+	) {
+		ServerButton(
+			icon = {
+				Icon(
+					imageVector = ImageVector.vectorResource(R.drawable.ic_house),
+					contentDescription = null,
+				)
+			},
+			name = { Text(server.name.ifBlank { server.address }) },
+			address = { Text(server.address) },
+			version = { Text(server.version.orEmpty()) },
+			onClick = onClick,
+			onLongClick = onLongClick,
+			interactionSource = interactionSource,
+			shape = ButtonDefaults.Shape,
+			modifier = Modifier.height(64.dp),
+		)
+	}
+}
+
+@Composable
+private fun ManualAddButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+	val accent = JellyfinTheme.colorScheme.rangeControlFill
+
+	Box(
+		modifier = modifier
+			.fillMaxWidth()
+			.border(width = 2.dp, color = accent, shape = ButtonDefaults.Shape),
+	) {
+		ServerButton(
+			icon = {
+				Icon(
+					imageVector = ImageVector.vectorResource(R.drawable.ic_add),
+					contentDescription = null,
+				)
+			},
+			name = { Text(stringResource(R.string.add_server_manually)) },
+			address = { },
+			version = { },
+			onClick = onClick,
+			shape = ButtonDefaults.Shape,
+			modifier = Modifier.height(56.dp),
+		)
+	}
 }

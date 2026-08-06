@@ -324,6 +324,8 @@
     <string name="lbl_remove_user_content">Remove account</string>
     <string name="lbl_sign_out_content">Requires login on next use</string>
     <string name="lbl_remove_server">Remove server</string>
+    <string name="server_removed">已移除服务器 %1$s</string>
+    <string name="add_server_manually">手动添加服务器</string>
     <string name="lbl_user_last_used">Last used on %1$s at %2$s</string>
     <string name="lbl_user_server">%1$s on %2$s</string>
     <string name="lbl_server">Server</string>

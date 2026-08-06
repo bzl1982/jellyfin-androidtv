@@ -50,12 +50,14 @@ fun ServerButton(
 	address: @Composable () -> Unit,
 	version: @Composable () -> Unit,
 	onClick: () -> Unit,
+	onLongClick: (() -> Unit)? = null,
 	modifier: Modifier = Modifier,
 	interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
 	shape: Shape = ButtonDefaults.Shape,
 ) {
 	ButtonBase(
 		onClick = onClick,
+		onLongClick = onLongClick,
 		modifier = modifier,
 		interactionSource = interactionSource,
 		shape = shape,
