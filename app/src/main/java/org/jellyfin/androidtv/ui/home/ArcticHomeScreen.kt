@@ -129,7 +129,7 @@ private val HeroLayoutMode.label: String
  * Rows below the hero support only two display modes.
  * Each row stores its own mode so one wall can mix portrait and landscape rows.
  */
-private enum class RowLayoutMode {
+enum class RowLayoutMode {
 	PORTRAIT,
 	LANDSCAPE,
 }
