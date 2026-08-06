@@ -762,7 +762,10 @@ private fun HeroStage(
 	Box(
 		modifier
 			.onFocusChanged {
-				if (it.isFocused) scope.launch { runCatching { scrollState.animateScrollTo(0) } }
+				// hasFocus (not isFocused): the Info button inside is what actually
+				// takes focus — the stage box must see child focus to snap the page
+				// back to the top when the remote returns to the big stage.
+				if (it.hasFocus) scope.launch { runCatching { scrollState.animateScrollTo(0) } }
 			},
 	) {
 		// Backdrop now lives INSIDE the scroll, so it scrolls away with the page
@@ -1517,8 +1520,12 @@ private fun ArcticRowView(
 			sidebarMode == SidebarMode.ICONS_AND_LABELS && sidebarExpanded -> 7f
 			else -> 7.5f
 		}
-		val cardWidth = (available - gap * (count - 1f)) / count
+	val cardWidth = (available - gap * (count - 1f)) / count
 
+	// Title row + poster row must stack vertically (Column), not pile on top of
+	// each other — a bare BoxWithConstraints would overlay the posters on the
+	// title and its layout-switch button.
+	Column {
 		Row(
 			verticalAlignment = Alignment.CenterVertically,
 			modifier = Modifier.padding(start = 36.dp, end = 36.dp, bottom = 12.dp),
@@ -1583,6 +1590,7 @@ private fun ArcticRowView(
 			}
 		}
 	}
+}
 }
 
 @Composable
