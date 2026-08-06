@@ -105,7 +105,6 @@ import android.graphics.Bitmap
 import coil3.ImageLoader
 import coil3.request.ImageRequest
 import coil3.toBitmap
-import kotlin.math.maxOf
 import kotlin.math.roundToInt
 
 // region Data model
@@ -339,7 +338,7 @@ fun ArcticHomeScreen() {
 	// 选中海报的主题色：从背景图边缘采样，缓存避免重复网络拉取与计算。
 	LaunchedEffect(activeItem?.id) {
 		val item = activeItem ?: return@LaunchedEffect
-		themeColorCache[item.id]?.let { cached ->
+		themeColorCache[item.id.toString()]?.let { cached ->
 			themeColor = cached
 			return@LaunchedEffect
 		}
@@ -352,7 +351,7 @@ fun ArcticHomeScreen() {
 				).image?.toBitmap()
 				bmp?.let {
 					val c = extractEdgeColor(it)
-					themeColorCache[item.id] = c
+					themeColorCache[item.id.toString()] = c
 					withContext(Dispatchers.Main) { themeColor = c }
 				}
 			}
@@ -853,8 +852,8 @@ private fun extractEdgeColor(bmp: Bitmap): Color {
 	val w = bmp.width
 	val h = bmp.height
 	if (w <= 0 || h <= 0) return Color(0xFF1A1D24)
-	val xMax = maxOf(1, (w * 0.20).toInt())
-	val yMax = maxOf(1, (h * 0.30).toInt())
+	val xMax = if ((w * 0.20).toInt() > 1) (w * 0.20).toInt() else 1
+	val yMax = if ((h * 0.30).toInt() > 1) (h * 0.30).toInt() else 1
 	var r = 0.0; var g = 0.0; var b = 0.0; var wsum = 0.0
 	fun sample(x: Int, y: Int) {
 		val p = bmp.getPixel(x, y)
