@@ -67,6 +67,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.preference.HeroLayoutMode
+import org.jellyfin.androidtv.preference.HeroLayoutModePreferences
 import org.jellyfin.androidtv.ui.base.CircularProgressIndicator
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
@@ -101,29 +103,6 @@ private data class ClassifiedItem(
 	val bucket: RegionBucket,
 	val subRowId: String?,
 )
-
-/**
- * Six hero/billboard layouts translated from the FUSE reference screenshots.
- * Cycling this changes ONLY the big stage at the top, never the rows below.
- */
-private enum class HeroLayoutMode {
-	FULL_BLEED_LEFT_INFO,
-	FULL_BLEED_CENTER_INFO,
-	POSTER_SHOWCASE,
-	LANDSCAPE_SHOWCASE,
-	MINIMAL_TITLE,
-	FULL_BLEED_WITH_NAV_PILLS,
-}
-
-private val HeroLayoutMode.label: String
-	get() = when (this) {
-		HeroLayoutMode.FULL_BLEED_LEFT_INFO -> "全屏海报+左信息"
-		HeroLayoutMode.FULL_BLEED_CENTER_INFO -> "全屏海报+居中信息"
-		HeroLayoutMode.POSTER_SHOWCASE -> "海报展示"
-		HeroLayoutMode.LANDSCAPE_SHOWCASE -> "横幅展示"
-		HeroLayoutMode.MINIMAL_TITLE -> "极简标题"
-		HeroLayoutMode.FULL_BLEED_WITH_NAV_PILLS -> "全屏海报+底部导航"
-	}
 
 /**
  * Rows below the hero support only two display modes.
@@ -166,7 +145,11 @@ fun ArcticHomeScreen() {
 	var categoryRows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
 	var categoryLoading by remember { mutableStateOf(false) }
 
-	var heroLayoutMode by remember { mutableStateOf(HeroLayoutMode.FULL_BLEED_LEFT_INFO) }
+	// Hero layout is a global preference (Settings -> Home -> FUSE 大舞台展示方式).
+	// Read it fresh on every (re)entry so a change made in Settings is picked up
+	// the next time the user lands on Home — no in-page switcher.
+	val heroLayoutMode = remember { HeroLayoutModePreferences.get(context) }
+
 	var homeHeroIndex by remember { mutableIntStateOf(0) }
 	var categoryHeroIndex by remember { mutableIntStateOf(0) }
 	var sidebarExpanded by remember { mutableStateOf(false) }
@@ -336,7 +319,6 @@ fun ArcticHomeScreen() {
 			categoryLoading = categoryLoading,
 			loaded = loaded,
 			heroLayoutMode = heroLayoutMode,
-			onHeroLayoutModeChange = { heroLayoutMode = it },
 			heroHeight = heroHeight,
 			onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
 			onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
@@ -553,7 +535,6 @@ private fun ArcticMainContent(
 	categoryLoading: Boolean,
 	loaded: Boolean,
 	heroLayoutMode: HeroLayoutMode,
-	onHeroLayoutModeChange: (HeroLayoutMode) -> Unit,
 	heroHeight: Dp,
 	onItemClick: (BaseItemDto) -> Unit,
 	onHeroPlay: (BaseItemDto) -> Unit,
@@ -588,7 +569,6 @@ private fun ArcticMainContent(
 			featuredCount = heroCount,
 			heroIndex = heroIndex,
 			layoutMode = heroLayoutMode,
-			onLayoutModeChange = onHeroLayoutModeChange,
 			onPlay = { heroItem?.let(onHeroPlay) },
 			onInfo = { heroItem?.let(onHeroInfo) },
 			onNextFeatured = {
@@ -668,7 +648,6 @@ private fun HeroStage(
 	featuredCount: Int,
 	heroIndex: Int,
 	layoutMode: HeroLayoutMode,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
 	onPlay: () -> Unit,
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
@@ -693,15 +672,8 @@ private fun HeroStage(
 			modifier = Modifier.fillMaxSize(),
 		)
 
-		// Small style switcher in the top-right corner. It is NOT on the bottom
-		// control row, so it does not clutter the play/info/dots row.
-		HeroStyleSwitcher(
-			current = layoutMode,
-			onChange = onLayoutModeChange,
-			modifier = Modifier
-				.align(Alignment.TopEnd)
-				.padding(top = 24.dp, end = 24.dp),
-		)
+		// Hero layout is selected in Settings -> Home -> FUSE 大舞台展示方式.
+		// It is NOT on this page, so the big stage stays clean.
 
 		when (layoutMode) {
 			HeroLayoutMode.FULL_BLEED_LEFT_INFO -> HeroInfoPanelLeft(
@@ -829,59 +801,6 @@ private fun HeroBackground(
 						1.00f to Color.Transparent,
 					),
 				),
-		)
-	}
-}
-
-@Composable
-private fun HeroStyleSwitcher(
-	current: HeroLayoutMode,
-	onChange: (HeroLayoutMode) -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	var focused by remember { mutableStateOf(false) }
-
-	Row(
-		modifier = modifier
-			.height(36.dp)
-			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused
-				else JellyfinTheme.colorScheme.background.copy(alpha = 0.45f),
-				RoundedCornerShape(10.dp),
-			)
-			.border(
-				width = 1.dp,
-				color = if (focused) Color.Transparent
-					else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.35f),
-				shape = RoundedCornerShape(10.dp),
-			)
-			.onFocusChanged { focused = it.hasFocus }
-			.clickable {
-				val entries = HeroLayoutMode.entries
-				onChange(entries[(current.ordinal + 1) % entries.size])
-			}
-			.padding(horizontal = 12.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(8.dp),
-	) {
-		Text(
-			current.label,
-			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
-				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.80f),
-			style = JellyfinTheme.typography.default.copy(
-				fontSize = 12.sp,
-				fontWeight = FontWeight.SemiBold,
-			),
-			maxLines = 1,
-		)
-		Text(
-			"⇄",
-			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
-				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.65f),
-			style = JellyfinTheme.typography.default.copy(
-				fontSize = 13.sp,
-				fontWeight = FontWeight.Bold,
-			),
 		)
 	}
 }
