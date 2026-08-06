@@ -339,7 +339,7 @@ fun ArcticHomeScreen() {
 		// pinned — when you browse down, the whole page scrolls up and the hero glides
 		// off the top, then the first row occupies the screen fully. No half-poster
 		// peeking from under a fixed banner.
-		val heroHeight = screenHeight * 0.88f
+		val heroHeight = screenHeight * 0.78f
 
 		val scrollState = rememberScrollState()
 		val firstRowFocus = remember { FocusRequester() }
@@ -699,12 +699,13 @@ private fun ArcticMainContent(
 			)
 		}
 
-		// Soft bridge: the dark hero base dissolves into the poster wall so the
-		// hero/poster junction has no hard line (FUSE-style gradient blend).
+		// Pull the first poster row up by one row: the hero is shortened and the
+		// bridge spacer is collapsed so the row sits right below the hero image,
+		// matching the FUSE homepage layout where rows begin high on the screen.
 		Box(
 			Modifier
 				.fillMaxWidth()
-				.height(72.dp)
+				.height(0.dp)
 				.background(
 					Brush.verticalGradient(
 						0.00f to JellyfinTheme.colorScheme.background,
