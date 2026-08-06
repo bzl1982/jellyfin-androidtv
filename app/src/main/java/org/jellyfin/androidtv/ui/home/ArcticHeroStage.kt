@@ -325,14 +325,15 @@ private fun HeroStandard(
 			.fillMaxSize()
 			.padding(
 				start = 40.dp,
-				top = if (compact) 40.dp else 110.dp,
+				// 文字整体上移：顶部 padding 由 110.dp → 56.dp，让标题与简介
+				// 不再被压到屏幕底部 (背景图下半区)。同时去掉了原先撑到底部的
+				// `Arrangement.Bottom + Spacer(weight(1f))` 结构——内容由顶部向下
+				// 自然铺，播放控制条也在文本下方固定位置，整体观感重心上移。
+				top = if (compact) 40.dp else 56.dp,
 				end = 48.dp,
 				bottom = if (compact) 32.dp else 64.dp,
 			),
-		verticalArrangement = Arrangement.Bottom,
 	) {
-		Spacer(Modifier.weight(1f))
-
 		Column(verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 10.dp)) {
 			HeroTitle(item, if (compact) 32.sp else 46.sp, titleFocus, onTitleClick, playFocus)
 			HeroMetaLine(item)
@@ -344,7 +345,10 @@ private fun HeroStandard(
 						style = JellyfinTheme.typography.default.copy(fontSize = 15.sp, lineHeight = 22.sp),
 						maxLines = 3,
 						overflow = TextOverflow.Ellipsis,
-						modifier = Modifier.width(680.dp),
+						// 简介宽度严格控制在父容器宽度的 50% 以内：
+						// 与评分/类型行（HeroMetaLine）保持「左半文字 + 右半留白」布局，
+						// 这样既不和评分/控制按钮横向打架，下方播放按钮区域也更纯净。
+						modifier = Modifier.fillMaxWidth(0.5f),
 					)
 				}
 			}

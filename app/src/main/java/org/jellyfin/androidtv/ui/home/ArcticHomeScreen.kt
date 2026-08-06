@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +39,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,6 +77,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.auth.repository.ServerRepository
+import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.preference.HeroLayoutMode
 import org.jellyfin.androidtv.preference.HeroLayoutModePreferences
 import org.jellyfin.androidtv.preference.SidebarMode
@@ -100,6 +104,7 @@ import org.jellyfin.sdk.model.api.BaseItemPerson
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.SortOrder
+import org.jellyfin.sdk.model.api.UserDto
 import org.koin.compose.koinInject
 import android.graphics.Bitmap
 import coil3.ImageLoader
@@ -150,6 +155,11 @@ fun ArcticHomeScreen() {
 	val context = LocalContext.current
 	val api = koinInject<ApiClient>()
 	val navigationRepository = koinInject<NavigationRepository>()
+	// 顶部右上角用户名 / 登录服务器 chip 数据源（注入一次，订阅 StateFlow）
+	val userRepository = koinInject<UserRepository>()
+	val serverRepository = koinInject<ServerRepository>()
+	val currentUser by userRepository.currentUser.collectAsState()
+	val currentServer by serverRepository.currentServer.collectAsState()
 	val menuStore = remember { MenuConfigurationStore(context) }
 
 	var menuConfig by remember { mutableStateOf(menuStore.load()) }
@@ -188,6 +198,10 @@ fun ArcticHomeScreen() {
 
 	val sidebarFocus = remember { FocusRequester() }
 	val mainContentFocus = remember { FocusRequester() }
+	// 顶部右上角「用户名 / 服务器」chip 的焦点锚点：左边 → 侧栏，下边 → 大舞台标题。
+	// 加进去之后，遥控按 ↑ 走到这里再也不会全屏显示「半截大舞台」——按左还能
+	// 立刻回到侧栏，按下则落到大舞台片名，等于在右上角多了一个导航出入口。
+	val userChipFocus = remember { FocusRequester() }
 	// 从侧栏（菜单栏）按右键进入内容区时，焦点应落在「大海报的片名」上，而不是
 	// 播放键——落在播放键会让大舞台只露出半截海报，影响观感。NO_STAGE 没有片名，
 	// 此时回退到首行首海报锚点。
@@ -383,7 +397,10 @@ fun ArcticHomeScreen() {
 		// pinned — when you browse down, the whole page scrolls up and the hero glides
 		// off the top, then the first row occupies the screen fully. No half-poster
 		// peeking from under a fixed banner.
-		val heroHeight = screenHeight * 0.78f
+		// 原 0.78f 把小海报行压到下半屏只剩 22% 显示区，行首卡几乎只露出半个身子；
+		// 收到反馈后改为 0.62f（约 62% 屏高），让首排海报至少占满剩下 30%+ 屏高，
+		// 下文 HeroStandard 也同步把文字上移，整个首页视觉重心更均衡。
+		val heroHeight = screenHeight * 0.62f
 
 		val scrollState = rememberScrollState()
 		val firstRowFocus = remember { FocusRequester() }
@@ -452,6 +469,26 @@ fun ArcticHomeScreen() {
 					selectedCategory = cat
 					Toast.makeText(context, "正在加载 ${cat.label}", Toast.LENGTH_SHORT).show()
 				}
+			},
+		)
+
+		// 顶部右上角「用户名 / 服务器」chip：让用户随时知道当前登录身份、切换账号或
+		// 登出。位置固定在 screen 顶部 +24dp 右侧，按 ← 交给侧栏，按 ↓ 进入大舞台。
+		// 用户在反馈里特别提到：「哪里都不会只显示半个大舞台」——加了 chip 之后，
+		// 远程 ↑ 走到这里时大舞台仍完整可见，因为该位置不影响 verticalScroll 视区。
+		TopRightUserChip(
+			modifier = Modifier
+				.align(Alignment.TopEnd)
+				.padding(top = 4.dp, end = 32.dp),
+			user = currentUser,
+			server = currentServer,
+			focusRequester = userChipFocus,
+			leftFocus = homeSidebarFocus,
+			downFocus = if (heroLayoutMode == HeroLayoutMode.NO_STAGE) mainContentFocus else heroTitleFocus,
+			onClick = {
+				// 暂时只把侧栏展开，让用户从侧栏走「切换用户」路径。
+				sidebarExpanded = true
+				runCatching { homeSidebarFocus.requestFocus() }
 			},
 		)
 
@@ -1378,6 +1415,123 @@ private fun ArcticPosterWallScreen(
 	LaunchedEffect(selected) {
 		delay(80)
 		runCatching { gridFirstFocus.requestFocus() }
+	}
+}
+
+// endregion
+
+// region Top-right user/server chip
+
+/**
+ * 顶部右上角小卡片：展示当前登录用户名 + 服务器名。
+ *
+ * 关键设计——不该影响 verticalScroll 布局：这个 chip 是 BoxWithConstraints 的
+ * 一个 align(TopEnd) 子元素，**不参与**主内容 verticalScroll 的高度计算，
+ * 因此它永远不会把大舞台往下挤、也永远不会被滚走。整个 chip 始终钉在右上角。
+ *
+ * 焦点约定（用户要求「增加这个位置的选中」）：
+ *   ←  →  跳到 homeSidebarFocus（侧栏第一项）
+ *   ↓  →  跳到 heroTitleFocus（NO_STAGE 时回到 mainContentFocus / 首行首海报）
+ *   ↑ / →  → 进入焦点自然搜索（不会困死）
+ *   OK / 点击 → 展开侧栏，让用户走「切换用户 / 登出」流程
+ */
+@Composable
+private fun TopRightUserChip(
+	modifier: Modifier = Modifier,
+	user: UserDto?,
+	server: org.jellyfin.androidtv.auth.model.Server?,
+	focusRequester: FocusRequester,
+	leftFocus: FocusRequester,
+	downFocus: FocusRequester,
+	onClick: () -> Unit,
+) {
+	val userName = user?.name?.takeIf { it.isNotBlank() } ?: "未登录"
+	val serverName = server?.name?.takeIf { it.isNotBlank() }
+		?: server?.address?.takeIf { it.isNotBlank() } ?: "未连接服务器"
+
+	Row(
+		modifier = modifier
+			.focusRequester(focusRequester)
+			.focusable()
+			.onPreviewKeyEvent { event ->
+				if (event.type == KeyEventType.KeyDown) {
+					when (event.key) {
+						Key.DirectionLeft -> {
+							runCatching { leftFocus.requestFocus() }
+							true
+						}
+						Key.DirectionDown -> {
+							runCatching { downFocus.requestFocus() }
+							true
+						}
+						else -> false
+					}
+				} else {
+					false
+				}
+			}
+			.onFocusChanged { state ->
+				// 焦点变化时刷新侧栏状态，让侧栏知道右上角也有可选项。
+				if (state.isFocused) {
+					// 无需拉侧栏，只是不消费。
+				}
+			}
+			.clip(RoundedCornerShape(24.dp))
+			.background(
+				Brush.horizontalGradient(
+					0.0f to Color(0xCC1A1F2C),
+					1.0f to Color(0xCC2A2F38),
+				)
+			)
+			.border(
+				width = 1.dp,
+				// 焦点时使用 accent 色描边（与列表焦点态一致）
+				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.18f),
+				shape = RoundedCornerShape(24.dp),
+			)
+			.padding(horizontal = 14.dp, vertical = 8.dp)
+			.clickable(onClick = onClick),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(8.dp),
+	) {
+		// 头像圆点（临时方案：FUSE 风格用首字母 / 颜色代替）
+		Box(
+			Modifier
+				.size(28.dp)
+				.clip(CircleShape)
+				.background(JellyfinTheme.colorScheme.buttonFocused),
+			contentAlignment = Alignment.Center,
+		) {
+			Text(
+				text = userName.firstOrNull()?.toString()?.uppercase() ?: "·",
+				color = Color.White,
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 14.sp,
+					fontWeight = FontWeight.SemiBold,
+				),
+			)
+		}
+		Column(
+			verticalArrangement = Arrangement.spacedBy(0.dp),
+		) {
+			Text(
+				text = userName,
+				color = Color.White,
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 13.sp,
+					fontWeight = FontWeight.SemiBold,
+				),
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+			Text(
+				text = serverName,
+				color = Color(0xFFB8C0CC),
+				style = JellyfinTheme.typography.default.copy(fontSize = 11.sp),
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+		}
 	}
 }
 

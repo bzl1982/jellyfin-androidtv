@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
@@ -123,6 +124,10 @@ class StartupActivity : FragmentActivity() {
 				Timber.i("CurrentUser changed to ${currentUser?.id} while waiting for startup.")
 
 				lifecycleScope.launch {
+					// 闪屏最少停留 3s：让「欢迎使用 Lorla」+ 加载点动画真能被看见，
+					// 同时给 MainActivity 启动 + 首页首图加载一个缓冲期，避免出现
+					// 闪屏一闪 → 白屏 → 慢慢加载 的"卡了"体验。
+					delay(3_000L)
 					openNextActivity()
 				}
 			} else {
