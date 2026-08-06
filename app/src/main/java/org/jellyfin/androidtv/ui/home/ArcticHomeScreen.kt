@@ -48,6 +48,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -83,11 +84,11 @@ import org.jellyfin.androidtv.util.apiclient.JellyfinImage
 import org.jellyfin.androidtv.util.apiclient.getUrl
 import org.jellyfin.androidtv.util.apiclient.itemBackdropImages
 import org.jellyfin.androidtv.util.apiclient.itemImages
+import org.jellyfin.androidtv.util.apiclient.primaryImage
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
-import org.jellyfin.sdk.model.api.BaseItemPersonType
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.SortOrder
@@ -979,7 +980,6 @@ private fun HeroInfoPanelLeft(
 }
 
 @Composable
-@Composable
 private fun HeroShowcaseCollage(
 	modifier: Modifier = Modifier,
 	item: BaseItemDto?,
@@ -997,13 +997,11 @@ private fun HeroShowcaseCollage(
 	onDown: () -> Unit,
 ) {
 	val api = koinInject<ApiClient>()
-	// Cast collage: pull up to 9 actors (square head shots) and tile them over a
-	// dimmed backdrop on the right side — the Arctic Fuse "showcase" look.
+	// Cast collage: pull up to 9 people (head shots) and tile them over a dimmed
+	// backdrop on the right side — the Arctic Fuse "showcase" look. The people
+	// list from Jellyfin is already ordered by importance (cast first).
 	val actors = remember(item?.id) {
-		item?.people?.orEmpty()
-			?.filter { it.type == BaseItemPersonType.ACTOR }
-			?.take(9)
-			.orEmpty()
+		item?.people?.orEmpty()?.take(9).orEmpty()
 	}
 
 	Box(modifier = modifier) {
@@ -1445,7 +1443,6 @@ private fun buildHeroMeta(item: BaseItemDto?): String = buildString {
 
 // region Rows
 
-@Composable
 @Composable
 private fun ArcticRowView(
 	title: String,
