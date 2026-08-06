@@ -87,10 +87,12 @@ import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.BaseItemPersonType
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.SortOrder
 import org.koin.compose.koinInject
+import kotlin.math.roundToInt
 
 // region Data model
 
@@ -196,6 +198,7 @@ fun ArcticHomeScreen() {
 							ItemFields.OVERVIEW,
 							ItemFields.DATE_CREATED,
 							ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
+							ItemFields.PEOPLE,
 						),
 						sortBy = setOf(ItemSortBy.DATE_CREATED),
 						sortOrder = setOf(SortOrder.DESCENDING),
@@ -578,6 +581,10 @@ private fun ArcticMainContent(
 	var rowModesHome by remember { mutableStateOf<Map<String, RowLayoutMode>>(emptyMap()) }
 	var rowModesCategory by remember { mutableStateOf<Map<String, RowLayoutMode>>(emptyMap()) }
 
+	// Y of the scroll container on screen, used by rows to compute their own
+	// content Y so focus can glide the page to the exact top of the focused row.
+	var containerY by remember { mutableIntStateOf(0) }
+
 	// When the rail expands, the whole page shifts right so it is never covered —
 	// the rail is an overlay, and the content simply makes room for it.
 	val contentLeft by animateDpAsState(
@@ -597,29 +604,35 @@ private fun ArcticMainContent(
 			.fillMaxSize()
 			.padding(start = contentLeft)
 			.then(modifier)
-			.verticalScroll(scrollState),
+			.verticalScroll(scrollState)
+			.onGloballyPositioned { containerY = it.positionInWindow().y.roundToInt() },
 	) {
-		HeroStage(
-			modifier = Modifier
-				.fillMaxWidth()
-				.height(heroHeight),
-			item = heroItem,
-			featuredCount = heroCount,
-			heroIndex = heroIndex,
-			layoutMode = heroLayoutMode,
-			onLayoutModeChange = onHeroLayoutModeChange,
-			onPlay = { heroItem?.let(onHeroPlay) },
-			onInfo = { heroItem?.let(onHeroInfo) },
-			onNextFeatured = {
-				if (heroCount > 0) onHeroIndexChange((heroIndex + 1) % heroCount)
-			},
-			onPreviousFeatured = {
-				if (heroCount > 0) onHeroIndexChange((heroIndex - 1 + heroCount) % heroCount)
-			},
-			initialFocus = initialFocus,
-			scrollState = scrollState,
-			onDown = { runCatching { firstRowFocus.requestFocus() } },
-		)
+		// NO_STAGE removes the big stage entirely (rows start at the top).
+		// SLIDE_STAGE renders the same standard layout but at half height.
+		val stageHeight = if (heroLayoutMode == HeroLayoutMode.SLIDE_STAGE) heroHeight * 0.55f else heroHeight
+		if (heroLayoutMode != HeroLayoutMode.NO_STAGE) {
+			HeroStage(
+				modifier = Modifier
+					.fillMaxWidth()
+					.height(stageHeight),
+				item = heroItem,
+				featuredCount = heroCount,
+				heroIndex = heroIndex,
+				layoutMode = heroLayoutMode,
+				onLayoutModeChange = onHeroLayoutModeChange,
+				onPlay = { heroItem?.let(onHeroPlay) },
+				onInfo = { heroItem?.let(onHeroInfo) },
+				onNextFeatured = {
+					if (heroCount > 0) onHeroIndexChange((heroIndex + 1) % heroCount)
+				},
+				onPreviousFeatured = {
+					if (heroCount > 0) onHeroIndexChange((heroIndex - 1 + heroCount) % heroCount)
+				},
+				initialFocus = initialFocus,
+				scrollState = scrollState,
+				onDown = { runCatching { firstRowFocus.requestFocus() } },
+			)
+		}
 
 		if (!loaded || (selectedCategory != null && categoryLoading)) {
 			Box(
@@ -669,6 +682,10 @@ private fun ArcticMainContent(
 					heroFocus = initialFocus,
 					sidebarFocus = rowSidebarFocus,
 					firstRowFocus = if (index == 0) firstRowFocus else null,
+					scrollState = scrollState,
+					containerY = containerY,
+					sidebarMode = sidebarMode,
+					sidebarExpanded = sidebarExpanded,
 				)
 			}
 		}
@@ -749,7 +766,9 @@ private fun HeroStage(
 		)
 
 		when (layoutMode) {
-			HeroLayoutMode.FULL_BLEED_LEFT_INFO -> HeroInfoPanelLeft(
+			HeroLayoutMode.FULL_BLEED_LEFT_INFO,
+			HeroLayoutMode.SLIDE_STAGE,
+			-> HeroInfoPanelLeft(
 				modifier = Modifier.fillMaxSize(),
 				item = item,
 				featuredCount = featuredCount,
@@ -766,7 +785,7 @@ private fun HeroStage(
 				onDown = onDown,
 			)
 
-			HeroLayoutMode.FULL_BLEED_CENTER_INFO -> HeroInfoPanelCenter(
+			HeroLayoutMode.SHOWCASE_COLLAGE -> HeroShowcaseCollage(
 				modifier = Modifier.fillMaxSize(),
 				item = item,
 				featuredCount = featuredCount,
@@ -783,7 +802,7 @@ private fun HeroStage(
 				onDown = onDown,
 			)
 
-			HeroLayoutMode.POSTER_SHOWCASE -> HeroPosterShowcase(
+			HeroLayoutMode.FANART_ONLY -> HeroFanartOnly(
 				modifier = Modifier.fillMaxSize(),
 				item = item,
 				featuredCount = featuredCount,
@@ -800,24 +819,7 @@ private fun HeroStage(
 				onDown = onDown,
 			)
 
-			HeroLayoutMode.LANDSCAPE_SHOWCASE -> HeroLandscapeShowcase(
-				modifier = Modifier.fillMaxSize(),
-				item = item,
-				featuredCount = featuredCount,
-				heroIndex = heroIndex,
-				onPlay = onPlay,
-				onInfo = onInfo,
-				onNextFeatured = onNextFeatured,
-				onPreviousFeatured = onPreviousFeatured,
-				onLayoutModeChange = onLayoutModeChange,
-				switchingLayout = switchingLayout,
-				onInfoRight = onInfoRight,
-				onExitLayoutSwitch = onExitLayoutSwitch,
-				initialFocus = initialFocus,
-				onDown = onDown,
-			)
-
-			HeroLayoutMode.MINIMAL_TITLE -> HeroMinimalTitle(
+			HeroLayoutMode.MINI_STAGE -> HeroMiniStage(
 				modifier = Modifier.fillMaxSize(),
 				item = item,
 				onPlay = onPlay,
@@ -832,20 +834,7 @@ private fun HeroStage(
 				onDown = onDown,
 			)
 
-			HeroLayoutMode.FULL_BLEED_WITH_NAV_PILLS -> HeroWithNavPills(
-				modifier = Modifier.fillMaxSize(),
-				item = item,
-				onPlay = onPlay,
-				onInfo = onInfo,
-				onNextFeatured = onNextFeatured,
-				onPreviousFeatured = onPreviousFeatured,
-				onLayoutModeChange = onLayoutModeChange,
-				switchingLayout = switchingLayout,
-				onInfoRight = onInfoRight,
-				onExitLayoutSwitch = onExitLayoutSwitch,
-				initialFocus = initialFocus,
-				onDown = onDown,
-			)
+			HeroLayoutMode.NO_STAGE -> Unit
 		}
 	}
 }
@@ -990,85 +979,8 @@ private fun HeroInfoPanelLeft(
 }
 
 @Composable
-private fun HeroInfoPanelCenter(
-	modifier: Modifier = Modifier,
-	item: BaseItemDto?,
-	featuredCount: Int,
-	heroIndex: Int,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	switchingLayout: Boolean,
-	onInfoRight: () -> Unit,
-	onExitLayoutSwitch: () -> Unit,
-	initialFocus: FocusRequester,
-	onDown: () -> Unit,
-) {
-	val bringIntoViewRequester = remember { BringIntoViewRequester() }
-	val bringIntoViewScope = rememberCoroutineScope()
-
-	Column(
-		modifier = modifier
-			.fillMaxHeight()
-			.padding(
-				start = view_pad_dp,
-				top = 120.dp,
-				end = view_pad_dp,
-				bottom = 80.dp,
-			),
-		verticalArrangement = Arrangement.Bottom,
-		horizontalAlignment = Alignment.CenterHorizontally,
-	) {
-		Spacer(Modifier.weight(1f))
-		Column(
-			verticalArrangement = Arrangement.spacedBy(10.dp),
-			horizontalAlignment = Alignment.CenterHorizontally,
-		) {
-			Text(
-				item?.name ?: "",
-				color = JellyfinTheme.colorScheme.onBackground,
-				style = JellyfinTheme.typography.default.copy(
-					fontSize = 46.sp,
-					fontWeight = FontWeight.Bold,
-				),
-				maxLines = 2,
-				overflow = TextOverflow.Ellipsis,
-			)
-			HeroMetaRow(item = item)
-		}
-
-		HeroControlRow(
-			modifier = Modifier
-				.fillMaxWidth()
-				.padding(top = 24.dp)
-				.bringIntoViewRequester(bringIntoViewRequester)
-				.onFocusChanged { state ->
-					if (state.isFocused) {
-						bringIntoViewScope.launch {
-							bringIntoViewRequester.bringIntoView()
-						}
-					}
-				},
-			onDown = onDown,
-			featuredCount = featuredCount,
-			heroIndex = heroIndex,
-			onPlay = onPlay,
-			onInfo = onInfo,
-			onNextFeatured = onNextFeatured,
-			onPreviousFeatured = onPreviousFeatured,
-			onLayoutModeChange = onLayoutModeChange,
-			switchingLayout = switchingLayout,
-			onInfoRight = onInfoRight,
-			onExitLayoutSwitch = onExitLayoutSwitch,
-			initialFocus = initialFocus,
-		)
-	}
-}
-
 @Composable
-private fun HeroPosterShowcase(
+private fun HeroShowcaseCollage(
 	modifier: Modifier = Modifier,
 	item: BaseItemDto?,
 	featuredCount: Int,
@@ -1085,31 +997,186 @@ private fun HeroPosterShowcase(
 	onDown: () -> Unit,
 ) {
 	val api = koinInject<ApiClient>()
-	val poster = item?.itemImages?.values?.firstOrNull()
-	val bringIntoViewRequester = remember { BringIntoViewRequester() }
-	val bringIntoViewScope = rememberCoroutineScope()
+	// Cast collage: pull up to 9 actors (square head shots) and tile them over a
+	// dimmed backdrop on the right side — the Arctic Fuse "showcase" look.
+	val actors = remember(item?.id) {
+		item?.people?.orEmpty()
+			?.filter { it.type == BaseItemPersonType.ACTOR }
+			?.take(9)
+			.orEmpty()
+	}
 
-	Row(
-		modifier = modifier
-			.padding(
-				start = 24.dp,
-				top = 120.dp,
-				end = view_pad_dp,
-				bottom = 60.dp,
-			),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(28.dp),
-	) {
+	Box(modifier = modifier) {
+		// Dim the base backdrop a bit harder so the collage pops.
+		Box(
+			Modifier
+				.fillMaxSize()
+				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f)),
+		)
+
+		if (actors.isNotEmpty()) {
+			// Right-side collage: 3 columns x up to 3 rows of circular head shots.
+			val rows = actors.chunked(3)
+			Column(
+				modifier = Modifier
+					.fillMaxHeight()
+					.align(Alignment.CenterEnd)
+					.padding(end = 40.dp),
+				verticalArrangement = Arrangement.Center,
+				horizontalAlignment = Alignment.End,
+			) {
+				rows.forEach { rowActors ->
+					Row(
+						horizontalArrangement = Arrangement.spacedBy(14.dp),
+						modifier = Modifier.padding(vertical = 7.dp),
+					) {
+						rowActors.forEach { person ->
+							val head = person.primaryImage
+							Box(
+								Modifier
+									.size(88.dp)
+									.clip(CircleShape)
+									.background(JellyfinTheme.colorScheme.surface.copy(alpha = 0.9f))
+									.border(
+										2.dp,
+										JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.25f),
+										CircleShape,
+									),
+							) {
+								if (head != null) {
+									AsyncImage(
+										url = head.getUrl(api, maxWidth = 200),
+										scaleType = ImageView.ScaleType.CENTER_CROP,
+										modifier = Modifier.fillMaxSize(),
+									)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Left info tower + bottom control row — same as the standard stage.
+		HeroInfoPanelLeft(
+			modifier = Modifier.fillMaxSize(),
+			item = item,
+			featuredCount = featuredCount,
+			heroIndex = heroIndex,
+			onPlay = onPlay,
+			onInfo = onInfo,
+			onNextFeatured = onNextFeatured,
+			onPreviousFeatured = onPreviousFeatured,
+			onLayoutModeChange = onLayoutModeChange,
+			switchingLayout = switchingLayout,
+			onInfoRight = onInfoRight,
+			onExitLayoutSwitch = onExitLayoutSwitch,
+			initialFocus = initialFocus,
+			onDown = onDown,
+		)
+	}
+}
+
+@Composable
+private fun HeroFanartOnly(
+	modifier: Modifier = Modifier,
+	item: BaseItemDto?,
+	featuredCount: Int,
+	heroIndex: Int,
+	onPlay: () -> Unit,
+	onInfo: () -> Unit,
+	onNextFeatured: () -> Unit,
+	onPreviousFeatured: () -> Unit,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
+	switchingLayout: Boolean,
+	onInfoRight: () -> Unit,
+	onExitLayoutSwitch: () -> Unit,
+	initialFocus: FocusRequester,
+	onDown: () -> Unit,
+) {
+	// Pure artwork stage: no info tower, just a small title top-right and the
+	// control row bottom-center. The full-bleed backdrop is already painted by
+	// HeroStage.
+	Box(modifier = modifier) {
+		Column(
+			modifier = Modifier
+				.fillMaxWidth()
+				.align(Alignment.TopEnd)
+				.padding(top = 36.dp, end = 48.dp),
+			horizontalAlignment = Alignment.End,
+		) {
+			Text(
+				item?.name ?: "",
+				color = JellyfinTheme.colorScheme.onBackground,
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 26.sp,
+					fontWeight = FontWeight.SemiBold,
+				),
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+		}
+
 		Box(
 			modifier = Modifier
-				.width(420.dp)
-				.height(620.dp)
-				.clip(RoundedCornerShape(12.dp))
-				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f)),
+				.fillMaxWidth()
+				.align(Alignment.BottomCenter)
+				.padding(bottom = 48.dp),
+		) {
+			HeroControlRow(
+				modifier = Modifier.fillMaxWidth(),
+				onDown = onDown,
+				featuredCount = featuredCount,
+				heroIndex = heroIndex,
+				onPlay = onPlay,
+				onInfo = onInfo,
+				onNextFeatured = onNextFeatured,
+				onPreviousFeatured = onPreviousFeatured,
+				onLayoutModeChange = onLayoutModeChange,
+				switchingLayout = switchingLayout,
+				onInfoRight = onInfoRight,
+				onExitLayoutSwitch = onExitLayoutSwitch,
+				initialFocus = initialFocus,
+			)
+		}
+	}
+}
+
+@Composable
+private fun HeroMiniStage(
+	modifier: Modifier = Modifier,
+	item: BaseItemDto?,
+	onPlay: () -> Unit,
+	onInfo: () -> Unit,
+	onNextFeatured: () -> Unit,
+	onPreviousFeatured: () -> Unit,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
+	switchingLayout: Boolean,
+	onInfoRight: () -> Unit,
+	onExitLayoutSwitch: () -> Unit,
+	initialFocus: FocusRequester,
+	onDown: () -> Unit,
+) {
+	val api = koinInject<ApiClient>()
+	val poster = item?.itemImages?.values?.firstOrNull() ?: item?.itemBackdropImages?.firstOrNull()
+
+	// Compact top strip: small poster + title + control row, all in one line.
+	Row(
+		modifier = modifier
+			.fillMaxWidth()
+			.padding(start = 36.dp, top = 24.dp, end = 36.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(24.dp),
+	) {
+		Box(
+			Modifier
+				.size(width = 76.dp, height = 112.dp)
+				.clip(RoundedCornerShape(8.dp))
+				.background(JellyfinTheme.colorScheme.surface.copy(alpha = 0.6f)),
 		) {
 			if (poster != null) {
 				AsyncImage(
-					url = poster.getUrl(api, maxWidth = 700),
+					url = poster.getUrl(api, maxWidth = 200),
 					blurHash = poster.blurHash,
 					scaleType = ImageView.ScaleType.FIT_CENTER,
 					modifier = Modifier.fillMaxSize(),
@@ -1119,120 +1186,13 @@ private fun HeroPosterShowcase(
 
 		Column(
 			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(10.dp),
-		) {
-			Spacer(Modifier.weight(1f))
-			Text(
-				item?.name ?: "",
-				color = JellyfinTheme.colorScheme.onBackground,
-				style = JellyfinTheme.typography.default.copy(
-					fontSize = 46.sp,
-					fontWeight = FontWeight.Bold,
-				),
-				maxLines = 2,
-				overflow = TextOverflow.Ellipsis,
-			)
-			HeroMetaRow(item = item)
-			item?.overview?.let { overview ->
-				Text(
-					overview,
-					color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.82f),
-					style = JellyfinTheme.typography.default.copy(fontSize = 15.sp, lineHeight = 22.sp),
-					maxLines = 5,
-					overflow = TextOverflow.Ellipsis,
-				)
-			}
-
-			HeroControlRow(
-				modifier = Modifier
-					.fillMaxWidth()
-					.padding(top = 24.dp)
-					.bringIntoViewRequester(bringIntoViewRequester)
-					.onFocusChanged { state ->
-						if (state.isFocused) {
-							bringIntoViewScope.launch {
-								bringIntoViewRequester.bringIntoView()
-							}
-						}
-					},
-			onDown = onDown,
-			featuredCount = featuredCount,
-			heroIndex = heroIndex,
-			onPlay = onPlay,
-			onInfo = onInfo,
-			onNextFeatured = onNextFeatured,
-			onPreviousFeatured = onPreviousFeatured,
-			onLayoutModeChange = onLayoutModeChange,
-			switchingLayout = switchingLayout,
-			onInfoRight = onInfoRight,
-			onExitLayoutSwitch = onExitLayoutSwitch,
-			initialFocus = initialFocus,
-		)
-		}
-	}
-}
-
-@Composable
-private fun HeroLandscapeShowcase(
-	modifier: Modifier = Modifier,
-	item: BaseItemDto?,
-	featuredCount: Int,
-	heroIndex: Int,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	switchingLayout: Boolean,
-	onInfoRight: () -> Unit,
-	onExitLayoutSwitch: () -> Unit,
-	initialFocus: FocusRequester,
-	onDown: () -> Unit,
-) {
-	val api = koinInject<ApiClient>()
-	val image = item?.itemBackdropImages?.firstOrNull() ?: item?.itemImages?.values?.firstOrNull()
-	val bringIntoViewRequester = remember { BringIntoViewRequester() }
-	val bringIntoViewScope = rememberCoroutineScope()
-
-	Column(
-		modifier = modifier
-			.fillMaxHeight()
-			.padding(
-				start = 24.dp,
-				top = 120.dp,
-				end = view_pad_dp,
-				bottom = 60.dp,
-			),
-		verticalArrangement = Arrangement.Bottom,
-	) {
-		Spacer(Modifier.weight(1f))
-
-		Box(
-			modifier = Modifier
-				.fillMaxWidth()
-				.height(320.dp)
-				.clip(RoundedCornerShape(12.dp))
-				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f)),
-		) {
-			if (image != null) {
-				AsyncImage(
-					url = image.getUrl(api, maxWidth = 1200),
-					blurHash = image.blurHash,
-					scaleType = ImageView.ScaleType.CENTER_CROP,
-					modifier = Modifier.fillMaxSize(),
-				)
-			}
-		}
-
-		Column(
-			modifier = Modifier.padding(top = 20.dp),
-			verticalArrangement = Arrangement.spacedBy(8.dp),
+			verticalArrangement = Arrangement.spacedBy(6.dp),
 		) {
 			Text(
 				item?.name ?: "",
 				color = JellyfinTheme.colorScheme.onBackground,
 				style = JellyfinTheme.typography.default.copy(
-					fontSize = 38.sp,
+					fontSize = 28.sp,
 					fontWeight = FontWeight.Bold,
 				),
 				maxLines = 1,
@@ -1242,82 +1202,7 @@ private fun HeroLandscapeShowcase(
 		}
 
 		HeroControlRow(
-			modifier = Modifier
-				.fillMaxWidth()
-				.padding(top = 20.dp)
-				.bringIntoViewRequester(bringIntoViewRequester)
-				.onFocusChanged { state ->
-					if (state.isFocused) {
-						bringIntoViewScope.launch {
-							bringIntoViewRequester.bringIntoView()
-						}
-					}
-				},
-			onDown = onDown,
-			featuredCount = featuredCount,
-			heroIndex = heroIndex,
-			onPlay = onPlay,
-			onInfo = onInfo,
-			onNextFeatured = onNextFeatured,
-			onPreviousFeatured = onPreviousFeatured,
-			onLayoutModeChange = onLayoutModeChange,
-			switchingLayout = switchingLayout,
-			onInfoRight = onInfoRight,
-			onExitLayoutSwitch = onExitLayoutSwitch,
-			initialFocus = initialFocus,
-		)
-	}
-}
-
-@Composable
-private fun HeroMinimalTitle(
-	modifier: Modifier = Modifier,
-	item: BaseItemDto?,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	switchingLayout: Boolean,
-	onInfoRight: () -> Unit,
-	onExitLayoutSwitch: () -> Unit,
-	initialFocus: FocusRequester,
-	onDown: () -> Unit,
-) {
-	val bringIntoViewRequester = remember { BringIntoViewRequester() }
-	val bringIntoViewScope = rememberCoroutineScope()
-
-	Column(
-		modifier = modifier
-			.fillMaxHeight()
-			.padding(bottom = 80.dp),
-		verticalArrangement = Arrangement.Bottom,
-		horizontalAlignment = Alignment.CenterHorizontally,
-	) {
-		Spacer(Modifier.weight(1f))
-		Text(
-			item?.name ?: "",
-			color = JellyfinTheme.colorScheme.onBackground,
-			style = JellyfinTheme.typography.default.copy(
-				fontSize = 56.sp,
-				fontWeight = FontWeight.Bold,
-			),
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-		)
-
-		HeroControlRow(
-			modifier = Modifier
-				.fillMaxWidth()
-				.padding(top = 24.dp)
-				.bringIntoViewRequester(bringIntoViewRequester)
-				.onFocusChanged { state ->
-					if (state.isFocused) {
-						bringIntoViewScope.launch {
-							bringIntoViewRequester.bringIntoView()
-						}
-					}
-				},
+			modifier = Modifier.fillMaxWidth(),
 			onDown = onDown,
 			featuredCount = 0,
 			heroIndex = 0,
@@ -1334,117 +1219,6 @@ private fun HeroMinimalTitle(
 	}
 }
 
-@Composable
-private fun HeroWithNavPills(
-	modifier: Modifier = Modifier,
-	item: BaseItemDto?,
-	onPlay: () -> Unit,
-	onInfo: () -> Unit,
-	onNextFeatured: () -> Unit,
-	onPreviousFeatured: () -> Unit,
-	onLayoutModeChange: (HeroLayoutMode) -> Unit,
-	switchingLayout: Boolean,
-	onInfoRight: () -> Unit,
-	onExitLayoutSwitch: () -> Unit,
-	initialFocus: FocusRequester,
-	onDown: () -> Unit,
-) {
-	val bringIntoViewRequester = remember { BringIntoViewRequester() }
-	val bringIntoViewScope = rememberCoroutineScope()
-
-	Column(
-		modifier = modifier
-			.fillMaxHeight()
-			.padding(
-				start = 24.dp,
-				top = 120.dp,
-				end = view_pad_dp,
-				bottom = 60.dp,
-			),
-		verticalArrangement = Arrangement.Bottom,
-	) {
-		Spacer(Modifier.weight(1f))
-		Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-			Text(
-				item?.name ?: "",
-				color = JellyfinTheme.colorScheme.onBackground,
-				style = JellyfinTheme.typography.default.copy(
-					fontSize = 46.sp,
-					fontWeight = FontWeight.Bold,
-				),
-				maxLines = 2,
-				overflow = TextOverflow.Ellipsis,
-			)
-			HeroMetaRow(item = item)
-		}
-
-		HeroControlRow(
-			modifier = Modifier
-				.fillMaxWidth()
-				.padding(top = 20.dp)
-				.bringIntoViewRequester(bringIntoViewRequester)
-				.onFocusChanged { state ->
-					if (state.isFocused) {
-						bringIntoViewScope.launch {
-							bringIntoViewRequester.bringIntoView()
-						}
-					}
-				},
-			onDown = onDown,
-			featuredCount = 0,
-			heroIndex = 0,
-			onPlay = onPlay,
-			onInfo = onInfo,
-			onNextFeatured = onNextFeatured,
-			onPreviousFeatured = onPreviousFeatured,
-			onLayoutModeChange = onLayoutModeChange,
-			switchingLayout = switchingLayout,
-			onInfoRight = onInfoRight,
-			onExitLayoutSwitch = onExitLayoutSwitch,
-			initialFocus = initialFocus,
-		)
-
-		// Bottom navigation pills matching the screenshot style.
-		Row(
-			modifier = Modifier
-				.fillMaxWidth()
-				.padding(top = 16.dp),
-			horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-			verticalAlignment = Alignment.CenterVertically,
-		) {
-			val pills = listOf("本周热门", "本周热门", "在影院")
-			pills.forEachIndexed { index, label ->
-				var focused by remember { mutableStateOf(false) }
-				Row(
-					modifier = Modifier
-						.height(40.dp)
-						.background(
-							if (focused) JellyfinTheme.colorScheme.buttonFocused
-							else JellyfinTheme.colorScheme.surface.copy(alpha = 0.45f),
-							RoundedCornerShape(20.dp),
-						)
-						.onFocusChanged { focused = it.hasFocus }
-						.clickable { }
-						.padding(horizontal = 16.dp),
-					verticalAlignment = Alignment.CenterVertically,
-				) {
-					Text(
-						label,
-						color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
-							else JellyfinTheme.colorScheme.onBackground,
-						style = JellyfinTheme.typography.default.copy(
-							fontSize = 13.sp,
-							fontWeight = FontWeight.SemiBold,
-						),
-						maxLines = 1,
-					)
-				}
-			}
-		}
-	}
-}
-
-@Composable
 private fun HeroMetaRow(item: BaseItemDto?) {
 	Row(
 		horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1672,6 +1446,7 @@ private fun buildHeroMeta(item: BaseItemDto?): String = buildString {
 // region Rows
 
 @Composable
+@Composable
 private fun ArcticRowView(
 	title: String,
 	items: List<BaseItemDto>,
@@ -1683,17 +1458,47 @@ private fun ArcticRowView(
 	heroFocus: FocusRequester,
 	sidebarFocus: FocusRequester,
 	firstRowFocus: FocusRequester?,
+	scrollState: ScrollState,
+	containerY: Int,
+	sidebarMode: SidebarMode,
+	sidebarExpanded: Boolean,
 ) {
 	val scope = rememberCoroutineScope()
-	val bringRequester = remember { BringIntoViewRequester() }
+	// Content Y of this row inside the scroll container. When the row gains
+	// focus the page glides to the exact top of the row (Netflix behaviour:
+	// "when focus reaches a level, the whole page scrolls with it").
+	var rowY by remember { mutableIntStateOf(0) }
 
-	Column(
+	BoxWithConstraints(
 		Modifier
 			.fillMaxWidth()
 			.padding(top = 18.dp, bottom = 6.dp)
-			.bringIntoViewRequester(bringRequester)
-			.onFocusChanged { if (it.isFocused) scope.launch { runCatching { bringRequester.bringIntoView() } } },
+			.onGloballyPositioned { coords ->
+				rowY = (coords.positionInWindow().y - containerY + scrollState.value).roundToInt()
+			}
+			.onFocusChanged { focused ->
+				if (focused) {
+					scope.launch {
+						runCatching { scrollState.animateScrollTo((rowY - 24).coerceAtLeast(0)) }
+					}
+				}
+			},
 	) {
+		// Poster width derived from how many fit fully visible in one row:
+		//  - rail hidden        -> 8 posters
+		//  - rail icons+labels expanded -> 7
+		//  - rail icons-only / collapsed -> 7.5 (last one half peeking)
+		//  - landscape rows     -> always 4
+		val gap = 16.dp
+		val available = maxWidth - 72.dp
+		val count = when {
+			layoutMode == RowLayoutMode.LANDSCAPE -> 4f
+			sidebarMode == SidebarMode.HIDDEN -> 8f
+			sidebarMode == SidebarMode.ICONS_AND_LABELS && sidebarExpanded -> 7f
+			else -> 7.5f
+		}
+		val cardWidth = (available - gap * (count - 1f)) / count
+
 		Row(
 			verticalAlignment = Alignment.CenterVertically,
 			modifier = Modifier.padding(start = 36.dp, end = 36.dp, bottom = 12.dp),
@@ -1723,7 +1528,7 @@ private fun ArcticRowView(
 		LazyRow(
 			modifier = Modifier.focusRestorer(),
 			contentPadding = PaddingValues(start = 36.dp, end = 36.dp),
-			horizontalArrangement = Arrangement.spacedBy(16.dp),
+			horizontalArrangement = Arrangement.spacedBy(gap),
 		) {
 			itemsIndexed(items, key = { _, it -> it.id }) { listIndex, item ->
 				val extraModifier = Modifier
@@ -1742,15 +1547,24 @@ private fun ArcticRowView(
 						} else false
 					}
 				when (layoutMode) {
-					RowLayoutMode.PORTRAIT -> PortraitPosterCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
-					RowLayoutMode.LANDSCAPE -> LandscapeCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
+					RowLayoutMode.PORTRAIT -> PortraitPosterCard(
+						item = item,
+						onClick = { onItemClick(item) },
+						modifier = extraModifier,
+						width = cardWidth,
+					)
+					RowLayoutMode.LANDSCAPE -> LandscapeCard(
+						item = item,
+						onClick = { onItemClick(item) },
+						modifier = extraModifier,
+						width = cardWidth,
+					)
 				}
 			}
 		}
 	}
 }
 
-@Composable
 private fun RowLayoutModeSwitch(
 	current: RowLayoutMode,
 	onChange: (RowLayoutMode) -> Unit,
@@ -1798,6 +1612,7 @@ private fun PortraitPosterCard(
 	item: BaseItemDto,
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
+	width: Dp = 200.dp,
 ) {
 	val api = koinInject<ApiClient>()
 	val image = item.itemImages.values.firstOrNull() ?: item.itemBackdropImages.firstOrNull()
@@ -1805,17 +1620,19 @@ private fun PortraitPosterCard(
 
 	Column(
 		modifier = modifier
-			.width(200.dp)
+			.width(width)
 			.onFocusChanged { focused = it.hasFocus }
 			.clickable(onClick = onClick),
 		verticalArrangement = Arrangement.spacedBy(8.dp),
 	) {
 		Box(
 			modifier = Modifier
-				.width(200.dp)
-				.height(294.dp)
+				.width(width)
+				.height(width * 1.5f)
 				.clip(RoundedCornerShape(8.dp))
-				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f))
+				// Light placeholder: a missing poster reads as "no art" instead of
+				// a black hole against the dark background.
+				.background(Color(0xFF555A63))
 				.border(
 					width = if (focused) 3.dp else 0.dp,
 					color = if (focused) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
@@ -1841,7 +1658,7 @@ private fun PortraitPosterCard(
 			),
 			maxLines = 1,
 			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.width(200.dp),
+			modifier = Modifier.width(width),
 		)
 	}
 }
@@ -1851,6 +1668,7 @@ private fun LandscapeCard(
 	item: BaseItemDto,
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
+	width: Dp = 300.dp,
 ) {
 	val api = koinInject<ApiClient>()
 	val image = item.itemBackdropImages.firstOrNull() ?: item.itemImages.values.firstOrNull()
@@ -1858,17 +1676,18 @@ private fun LandscapeCard(
 
 	Column(
 		modifier = modifier
-			.width(300.dp)
+			.width(width)
 			.onFocusChanged { focused = it.hasFocus }
 			.clickable(onClick = onClick),
 		verticalArrangement = Arrangement.spacedBy(8.dp),
 	) {
 		Box(
 			modifier = Modifier
-				.width(300.dp)
-				.height(170.dp)
+				.width(width)
+				.height(width * 9f / 16f)
 				.clip(RoundedCornerShape(8.dp))
-				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f))
+				// Light placeholder, same as portrait.
+				.background(Color(0xFF555A63))
 				.border(
 					width = if (focused) 3.dp else 0.dp,
 					color = if (focused) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
@@ -1894,7 +1713,7 @@ private fun LandscapeCard(
 			),
 			maxLines = 1,
 			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.width(300.dp),
+			modifier = Modifier.width(width),
 		)
 		Text(
 			buildHeroMeta(item),
@@ -1902,7 +1721,7 @@ private fun LandscapeCard(
 			style = JellyfinTheme.typography.default.copy(fontSize = 12.sp),
 			maxLines = 1,
 			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.width(300.dp),
+			modifier = Modifier.width(width),
 		)
 	}
 }

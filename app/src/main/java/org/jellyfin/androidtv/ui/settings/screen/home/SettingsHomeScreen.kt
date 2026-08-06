@@ -93,11 +93,11 @@ fun SettingsHomeScreen() {
 
 private fun subtitleFor(mode: HeroLayoutMode): String = when (mode) {
 	HeroLayoutMode.FULL_BLEED_LEFT_INFO -> "全屏海报背景，左下标题+简介+评分（默认）"
-	HeroLayoutMode.FULL_BLEED_CENTER_INFO -> "全屏海报背景，标题居中、底部信息条"
-	HeroLayoutMode.POSTER_SHOWCASE -> "左侧大海报 + 右侧剧情信息"
-	HeroLayoutMode.LANDSCAPE_SHOWCASE -> "横幅大图 + 下方信息面板"
-	HeroLayoutMode.MINIMAL_TITLE -> "极简：只显示大标题，按钮居中"
-	HeroLayoutMode.FULL_BLEED_WITH_NAV_PILLS -> "全屏海报 + 底部分类胶囊导航"
+	HeroLayoutMode.SHOWCASE_COLLAGE -> "右侧演员头像拼贴，FUSE 招牌风格"
+	HeroLayoutMode.FANART_ONLY -> "纯背景大图，仅右上小标题+底部控制"
+	HeroLayoutMode.MINI_STAGE -> "迷你舞台：小海报+标题+按钮一条横排"
+	HeroLayoutMode.NO_STAGE -> "无大舞台，直接显示海报行"
+	HeroLayoutMode.SLIDE_STAGE -> "半高舞台，向下浏览时自然滑走"
 }
 
 private fun sidebarSubtitleFor(mode: SidebarMode): String = when (mode) {
