@@ -10,14 +10,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -28,20 +27,20 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.onVisibilityChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.ui.base.Icon
+import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.LocalTextStyle
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.button.IconButton
-import org.jellyfin.androidtv.ui.base.popover.Popover
+import org.jellyfin.androidtv.ui.base.button.IconButtonDefaults
+import org.jellyfin.androidtv.ui.base.SeekbarDefaults
 import org.jellyfin.androidtv.ui.composable.rememberPlayerPositionInfo
 import org.jellyfin.androidtv.ui.player.base.PlayerSeekbar
 import org.jellyfin.playback.core.PlaybackManager
 import org.jellyfin.playback.core.model.PlayState
-import org.jellyfin.playback.core.queue.queue
 import org.koin.compose.koinInject
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -52,16 +51,22 @@ fun VideoPlayerControls(
 	playbackManager: PlaybackManager = koinInject(),
 	onPlaybackInfoClick: () -> Unit = {},
 ) {
-	val playState by playbackManager.state.playState.collectAsState()
+	val accent = JellyfinTheme.colorScheme.rangeControlFill
 
 	Column(
-		verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
+		verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.Bottom),
+		modifier = Modifier
+			.fillMaxWidth()
+			.padding(bottom = 10.dp)
 	) {
 		Row(
-			horizontalArrangement = Arrangement.spacedBy(12.dp),
+			horizontalArrangement = Arrangement.spacedBy(16.dp),
+			verticalAlignment = Alignment.CenterVertically,
 			modifier = Modifier
+				.fillMaxWidth()
 				.focusRestorer()
 				.focusGroup()
+				.padding(horizontal = 36.dp)
 		) {
 			PlayPauseButton(playbackManager, playState)
 			RewindButton(playbackManager)
@@ -69,32 +74,50 @@ fun VideoPlayerControls(
 
 			Spacer(Modifier.weight(1f))
 
+			PreviousEntryButton(playbackManager)
+			NextEntryButton(playbackManager)
 			PlaybackInfoButton(onClick = onPlaybackInfoClick)
-
-			MoreOptionsButton {
-				PreviousEntryButton(playbackManager)
-				NextEntryButton(playbackManager)
-			}
 		}
 
 		PlayerSeekbar(
 			playbackManager = playbackManager,
+			colors = SeekbarDefaults.colors(
+				progressColor = accent,
+				knobColor = accent,
+			),
 			modifier = Modifier
 				.fillMaxWidth()
-				.height(4.dp)
+				.padding(horizontal = 36.dp)
+				.height(5.dp)
 		)
 
 		Row(
-			horizontalArrangement = Arrangement.spacedBy(12.dp),
+			horizontalArrangement = Arrangement.spacedBy(8.dp),
 			modifier = Modifier
-				.focusRestorer()
-				.focusGroup()
+				.fillMaxWidth()
+				.padding(horizontal = 36.dp, vertical = 4.dp)
 		) {
-			Spacer(Modifier.weight(1f))
-			PositionText(playbackManager)
+			PositionText(playbackManager, accent)
 		}
 	}
 }
+
+/**
+ * FUSE-style OSD button colors:
+ * - container stays fully transparent (no focus box, unlike the default ButtonBase)
+ * - unfocused icon = dimmed white (FUSE `panel_fg_70`)
+ * - focused icon = re-colored to the skin accent (Netflix red / Infuse orange)
+ *   (Icon tints automatically from the button's content color via LocalTextStyle)
+ */
+@Composable
+private fun osdButtonColors() = IconButtonDefaults.colors(
+	containerColor = Color.Transparent,
+	contentColor = Color.White.copy(alpha = 0.6f),
+	focusedContainerColor = Color.Transparent,
+	focusedContentColor = JellyfinTheme.colorScheme.rangeControlFill,
+	disabledContainerColor = Color.Transparent,
+	disabledContentColor = Color.White.copy(alpha = 0.25f),
+)
 
 @Composable
 private fun PlayPauseButton(
@@ -112,6 +135,7 @@ private fun PlayPauseButton(
 				PlayState.PAUSED -> playbackManager.state.unpause()
 			}
 		},
+		colors = osdButtonColors(),
 		modifier = Modifier
 			.focusRequester(focusRequester)
 			.onVisibilityChanged {
@@ -124,6 +148,7 @@ private fun PlayPauseButton(
 					Icon(
 						imageVector = ImageVector.vectorResource(R.drawable.ic_pause),
 						contentDescription = stringResource(R.string.lbl_pause),
+						modifier = Modifier.size(30.dp)
 					)
 				}
 
@@ -133,6 +158,7 @@ private fun PlayPauseButton(
 					Icon(
 						imageVector = ImageVector.vectorResource(R.drawable.ic_play),
 						contentDescription = stringResource(R.string.lbl_play),
+						modifier = Modifier.size(30.dp)
 					)
 				}
 			}
@@ -145,10 +171,12 @@ private fun RewindButton(
 	playbackManager: PlaybackManager,
 ) = IconButton(
 	onClick = { playbackManager.state.rewind() },
+	colors = osdButtonColors(),
 ) {
 	Icon(
 		imageVector = ImageVector.vectorResource(R.drawable.ic_rewind),
 		contentDescription = stringResource(R.string.rewind),
+		modifier = Modifier.size(30.dp)
 	)
 }
 
@@ -157,10 +185,12 @@ private fun FastForwardButton(
 	playbackManager: PlaybackManager,
 ) = IconButton(
 	onClick = { playbackManager.state.fastForward() },
+	colors = osdButtonColors(),
 ) {
 	Icon(
 		imageVector = ImageVector.vectorResource(R.drawable.ic_fast_forward),
 		contentDescription = stringResource(R.string.fast_forward),
+		modifier = Modifier.size(30.dp)
 	)
 }
 
@@ -178,10 +208,12 @@ private fun PreviousEntryButton(
 				playbackManager.queue.previous()
 			}
 		},
+		colors = osdButtonColors(),
 	) {
 		Icon(
 			imageVector = ImageVector.vectorResource(R.drawable.ic_previous),
 			contentDescription = stringResource(R.string.lbl_prev_item),
+			modifier = Modifier.size(30.dp)
 		)
 	}
 }
@@ -200,10 +232,12 @@ private fun NextEntryButton(
 				playbackManager.queue.next()
 			}
 		},
+		colors = osdButtonColors(),
 	) {
 		Icon(
 			imageVector = ImageVector.vectorResource(R.drawable.ic_next),
 			contentDescription = stringResource(R.string.lbl_next_item),
+			modifier = Modifier.size(30.dp)
 		)
 	}
 }
@@ -221,53 +255,33 @@ private fun Duration.formatted(includeHours: Boolean): String {
 @Composable
 private fun PositionText(
 	playbackManager: PlaybackManager,
+	accent: Color,
 ) {
 	val positionInfo by rememberPlayerPositionInfo(playbackManager, precision = 1.seconds)
 	if (positionInfo.duration == Duration.ZERO) return
 
-	val text by remember {
+	val formatted by remember {
 		derivedStateOf {
 			val includeHours = positionInfo.duration.inWholeMinutes >= 60
-			val activeFormatted = positionInfo.active.formatted(includeHours)
-			val durationFormatted = positionInfo.duration.formatted(includeHours)
-
-			"$activeFormatted / $durationFormatted"
+			positionInfo.active.formatted(includeHours) to positionInfo.duration.formatted(includeHours)
 		}
 	}
+	val activeFormatted = formatted.first
+	val durationFormatted = formatted.second
 
-	Text(
-		text = text,
-		style = LocalTextStyle.current.copy(color = Color.White)
-	)
-}
-
-@Composable
-private fun MoreOptionsButton(
-	content: @Composable () -> Unit,
-) = Box {
-	var expanded by remember { mutableStateOf(false) }
-	IconButton(
-		onClick = { expanded = true },
-	) {
-		Icon(
-			imageVector = ImageVector.vectorResource(R.drawable.ic_more),
-			contentDescription = stringResource(R.string.lbl_other_options),
+	Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+		Text(
+			text = activeFormatted,
+			style = LocalTextStyle.current.copy(color = accent)
 		)
-	}
-
-	Popover(
-		expanded = expanded,
-		onDismissRequest = { expanded = false },
-		alignment = Alignment.TopCenter,
-		offset = DpOffset(0.dp, (-5).dp)
-	) {
-		Row(
-			horizontalArrangement = Arrangement.spacedBy(12.dp),
-			modifier = Modifier
-				.padding(4.dp)
-		) {
-			content()
-		}
+		Text(
+			text = "/",
+			style = LocalTextStyle.current.copy(color = Color.White.copy(alpha = 0.4f))
+		)
+		Text(
+			text = durationFormatted,
+			style = LocalTextStyle.current.copy(color = Color.White.copy(alpha = 0.7f))
+		)
 	}
 }
 
@@ -276,9 +290,11 @@ fun PlaybackInfoButton(
 	onClick: () -> Unit,
 ) = IconButton(
 	onClick = onClick,
+	colors = osdButtonColors(),
 ) {
 	Icon(
 		imageVector = ImageVector.vectorResource(R.drawable.ic_info),
 		contentDescription = stringResource(R.string.playback_info),
+		modifier = Modifier.size(30.dp)
 	)
 }
