@@ -315,7 +315,7 @@ fun ArcticHomeScreen() {
 		backTick += 1
 	}
 
-	BoxWithConstraints(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
+	BoxWithConstraints(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background).padding(top = 24.dp)) {
 		val screenHeight = maxHeight
 		// Netflix-style: the hero is the FIRST screen of one vertical scroll. It is NOT
 		// pinned — when you browse down, the whole page scrolls up and the hero glides
@@ -438,14 +438,14 @@ private fun ArcticSidebar(
 			modifier = Modifier
 				.fillMaxHeight()
 				.width(targetWidth)
-				.background(
-					Brush.horizontalGradient(
-						0.00f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.88f else 0.60f),
-						0.70f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.50f else 0.0f),
-						1.00f to Color.Transparent,
-					),
-				)
-				.padding(vertical = 100.dp)
+			.background(
+				Brush.horizontalGradient(
+					0.00f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.94f else 0.82f),
+					0.80f to JellyfinTheme.colorScheme.background.copy(alpha = if (expanded) 0.94f else 0.82f),
+					1.00f to Color.Transparent,
+				),
+			)
+			.padding(vertical = 72.dp)
 				.verticalScroll(scrollState)
 				.onPreviewKeyEvent {
 					if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionRight) {
@@ -658,6 +658,20 @@ private fun ArcticMainContent(
 				scrollState = scrollState,
 			)
 		}
+
+		// Soft bridge: the dark hero base dissolves into the poster wall so the
+		// hero/poster junction has no hard line (FUSE-style gradient blend).
+		Box(
+			Modifier
+				.fillMaxWidth()
+				.height(72.dp)
+				.background(
+					Brush.verticalGradient(
+						0.00f to JellyfinTheme.colorScheme.background,
+						1.00f to Color.Transparent,
+					),
+				),
+		)
 
 		if (!loaded || (selectedCategory != null && categoryLoading)) {
 			Box(

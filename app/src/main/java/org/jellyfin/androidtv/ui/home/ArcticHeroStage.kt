@@ -243,7 +243,7 @@ private fun HeroArtLayer(
 
 		// 2. combined_flixart vignette - contrast for text and controls, no band.
 		Box(Modifier.fillMaxSize().background(FuseColors.vignetteLeft(0.58f)))
-		Box(Modifier.fillMaxSize().background(FuseColors.vignetteBottom(0.42f)))
+		Box(Modifier.fillMaxSize().background(FuseColors.vignetteBottom(0.55f)))
 
 		// 3. the key light, tracking whichever control the remote is on.
 		Box(
