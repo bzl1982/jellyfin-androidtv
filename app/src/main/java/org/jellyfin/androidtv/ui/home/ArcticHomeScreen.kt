@@ -60,6 +60,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
@@ -78,6 +79,7 @@ import org.jellyfin.androidtv.preference.HeroLayoutMode
 import org.jellyfin.androidtv.preference.HeroLayoutModePreferences
 import org.jellyfin.androidtv.preference.SidebarMode
 import org.jellyfin.androidtv.preference.SidebarModePreferences
+import org.jellyfin.androidtv.preference.HomeRowsPreferences
 import org.jellyfin.androidtv.ui.base.CircularProgressIndicator
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
@@ -131,6 +133,12 @@ private val RowLayoutMode.next: RowLayoutMode
 		RowLayoutMode.LANDSCAPE -> RowLayoutMode.PORTRAIT
 	}
 
+/**
+ * 初次进入首页时只生成前几个栏目，避免一次性渲染太多海报行导致卡顿。
+ * 其余栏目在「设置 → 首页 → 加载全部栏目」中手动开启。
+ */
+private const val HOME_ROWS_INITIAL = 5
+
 // endregion
 
 @Composable
@@ -170,6 +178,11 @@ fun ArcticHomeScreen() {
 
 	val sidebarFocus = remember { FocusRequester() }
 	val mainContentFocus = remember { FocusRequester() }
+	// 从侧栏（菜单栏）按右键进入内容区时，焦点应落在「大海报的片名」上，而不是
+	// 播放键——落在播放键会让大舞台只露出半截海报，影响观感。NO_STAGE 没有片名，
+	// 此时回退到首行首海报锚点。
+	val heroTitleFocus = remember { FocusRequester() }
+	val contentEntryFocus = if (heroLayoutMode == HeroLayoutMode.NO_STAGE) mainContentFocus else heroTitleFocus
 
 	// One FocusRequester per left-rail entry so any row's leftmost poster (←) can
 	// jump straight to the matching rail item: index 0 = Home, 1 = Search,
@@ -240,11 +253,13 @@ fun ArcticHomeScreen() {
 						.take(30)
 					if (items.isEmpty()) null else ArcticRow(type.label, items)
 				}
+				// 初次进入只生成前几个栏目，减轻一次性渲染压力；其余在设置里开启。
+				val visibleRows = if (HomeRowsPreferences.get(context)) typeRows else typeRows.take(HOME_ROWS_INITIAL)
 
 				withContext(Dispatchers.Main) {
 					allItems = classified
 					featuredItems = featured
-					homeRows = typeRows
+					homeRows = visibleRows
 					loaded = true
 				}
 			}.onFailure { it.printStackTrace() }
@@ -359,6 +374,7 @@ fun ArcticHomeScreen() {
 			onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
 			onRowMore = { title, items -> posterWall = title to items },
 			initialFocus = mainContentFocus,
+			heroTitleFocus = heroTitleFocus,
 			homeSidebarFocus = homeSidebarFocus,
 			categorySidebarFocus = categorySidebarFocus,
 		)
@@ -368,7 +384,7 @@ fun ArcticHomeScreen() {
 			onExpandedChange = { sidebarExpanded = it },
 			mode = sidebarMode,
 			itemFocusRequesters = sidebarItemFocus,
-			mainContentFocus = mainContentFocus,
+			mainContentFocus = contentEntryFocus,
 			config = menuConfig,
 			onHome = {
 				if (selectedCategory != null) {
@@ -406,12 +422,12 @@ fun ArcticHomeScreen() {
 		}
 	}
 
-	// Entering the screen, and every BACK press, parks the remote on the big
-	// stage's play button. The stage reacts to gaining focus by gliding the page
-	// back to the top, so BACK always lands on a clean, fully visible home.
+	// 进入首页以及每次按返回键，焦点都落在大舞台的「片名」上（NO_STAGE 时落到首行
+	// 首海报）。片名在大舞台偏上位置，获得焦点时整页滑回顶部，从而始终看到完整海报，
+	// 避免落在播放键导致的「半截海报」。
 	LaunchedEffect(backTick) {
 		delay(80)
-		runCatching { mainContentFocus.requestFocus() }
+		runCatching { contentEntryFocus.requestFocus() }
 	}
 }
 
@@ -606,6 +622,7 @@ private fun ArcticMainContent(
 	onHeroInfo: (BaseItemDto) -> Unit,
 	onRowMore: (String, List<BaseItemDto>) -> Unit,
 	initialFocus: FocusRequester,
+	heroTitleFocus: FocusRequester,
 	homeSidebarFocus: FocusRequester,
 	categorySidebarFocus: FocusRequester,
 ) {
@@ -639,7 +656,6 @@ private fun ArcticMainContent(
 	// LEFT on the leftmost hero control returns to the rail entry that matches
 	// the current view, same rule the poster rows follow.
 	val heroSidebarFocus = if (selectedCategory == null) homeSidebarFocus else categorySidebarFocus
-	val heroTitleFocus = remember { FocusRequester() }
 
 	Column(
 		Modifier
@@ -839,6 +855,9 @@ private fun ArcticRowView(
 	// Title row + poster row must stack vertically (Column), not pile on top of
 	// each other — a bare BoxWithConstraints would overlay the posters on the
 	// title and its layout-switch button.
+	// Title row + poster row stack vertically (Column). The title is now a plain
+	// label — the display-mode switch moved to "hold OK 3s on any poster", and the
+	// 「更多」wall entry is a poster card after the 20th item (see below).
 	Column {
 		Row(
 			verticalAlignment = Alignment.CenterVertically,
@@ -851,56 +870,14 @@ private fun ArcticRowView(
 					.background(JellyfinTheme.colorScheme.buttonFocused, RoundedCornerShape(2.dp)),
 			)
 			Spacer(Modifier.width(10.dp))
-			// The row title itself is the display-mode toggle: click / select it to
-			// flip between 竖屏 and 横幅. The old top-right switch is gone — that
-			// slot is now the 「更多」entry into the full poster wall.
-			var titleFocused by remember { mutableStateOf(false) }
-			Box(
-				Modifier
-					.onFocusChanged { titleFocused = it.hasFocus }
-					.clickable { onLayoutModeChange(layoutMode.next) }
-					.background(
-						if (titleFocused) JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.18f)
-						else Color.Transparent,
-						RoundedCornerShape(6.dp),
-					)
-					.padding(horizontal = 8.dp, vertical = 4.dp),
-			) {
-				Text(
-					title,
-					color = if (titleFocused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.listHeader,
-					style = JellyfinTheme.typography.default.copy(
-						fontWeight = FontWeight.Bold,
-						fontSize = 19.sp,
-					),
-				)
-			}
-			Spacer(Modifier.weight(1f))
-			// 「更多」→ 该目录的全屏海报墙（带 地区 / 影片类型 标签筛选）
-			var moreFocused by remember { mutableStateOf(false) }
-			Box(
-				Modifier
-					.height(34.dp)
-					.onFocusChanged { moreFocused = it.hasFocus }
-					.clickable(onClick = onMore)
-					.background(
-						if (moreFocused) JellyfinTheme.colorScheme.buttonFocused
-						else JellyfinTheme.colorScheme.surface.copy(alpha = 0.40f),
-						RoundedCornerShape(8.dp),
-					)
-					.padding(horizontal = 14.dp),
-				contentAlignment = Alignment.Center,
-			) {
-				Text(
-					"更多",
-					color = if (moreFocused) JellyfinTheme.colorScheme.onButtonFocused
-						else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.8f),
-					style = JellyfinTheme.typography.default.copy(
-						fontSize = 13.sp,
-						fontWeight = FontWeight.SemiBold,
-					),
-				)
-			}
+			Text(
+				title,
+				color = JellyfinTheme.colorScheme.listHeader,
+				style = JellyfinTheme.typography.default.copy(
+					fontWeight = FontWeight.Bold,
+					fontSize = 19.sp,
+				),
+			)
 		}
 
 		LazyRow(
@@ -908,40 +885,111 @@ private fun ArcticRowView(
 			contentPadding = PaddingValues(start = 36.dp, end = 36.dp),
 			horizontalArrangement = Arrangement.spacedBy(gap),
 		) {
-			itemsIndexed(items, key = { _, it -> it.id }) { listIndex, item ->
-				val extraModifier = Modifier
-					.then(if (isFirstRow && listIndex == 0 && firstRowFocus != null) Modifier.focusRequester(firstRowFocus) else Modifier)
-					.onPreviewKeyEvent { ev ->
-						if (ev.type == KeyEventType.KeyDown) {
-							when (ev.key) {
-								Key.DirectionLeft -> {
-									if (listIndex == 0) { runCatching { sidebarFocus.requestFocus() }; true } else false
+			// 「更多」海报墙入口放在第 20 个影片之后（不足 20 个则放在末尾）。
+			val morePos = if (items.size > 20) 20 else items.size
+			for (index in items.indices) {
+				item(key = items[index].id) {
+					val extra = Modifier
+						.then(if (isFirstRow && index == 0 && firstRowFocus != null) Modifier.focusRequester(firstRowFocus) else Modifier)
+						.onPreviewKeyEvent { ev ->
+							if (ev.type == KeyEventType.KeyDown) {
+								when (ev.key) {
+									Key.DirectionLeft -> {
+										if (index == 0) { runCatching { sidebarFocus.requestFocus() }; true } else false
+									}
+									Key.DirectionUp -> {
+										if (isFirstRow && index == 0) { runCatching { heroFocus.requestFocus() }; true } else false
+									}
+									else -> false
 								}
-								Key.DirectionUp -> {
-									if (isFirstRow && listIndex == 0) { runCatching { heroFocus.requestFocus() }; true } else false
-								}
-								else -> false
-							}
-						} else false
+							} else false
+						}
+					when (layoutMode) {
+						RowLayoutMode.PORTRAIT -> PortraitPosterCard(
+							item = items[index],
+							onClick = { onItemClick(items[index]) },
+							onLongPress = { onLayoutModeChange(layoutMode.next) },
+							modifier = extra,
+							width = cardWidth,
+						)
+						RowLayoutMode.LANDSCAPE -> LandscapeCard(
+							item = items[index],
+							onClick = { onItemClick(items[index]) },
+							onLongPress = { onLayoutModeChange(layoutMode.next) },
+							modifier = extra,
+							width = cardWidth,
+						)
 					}
-				when (layoutMode) {
-					RowLayoutMode.PORTRAIT -> PortraitPosterCard(
-						item = item,
-						onClick = { onItemClick(item) },
-						modifier = extraModifier,
-						width = cardWidth,
-					)
-					RowLayoutMode.LANDSCAPE -> LandscapeCard(
-						item = item,
-						onClick = { onItemClick(item) },
-						modifier = extraModifier,
-						width = cardWidth,
-					)
+				}
+				if (index == morePos - 1) {
+					item(key = "__more__${title}") {
+						MorePosterCard(onClick = onMore, width = cardWidth)
+					}
 				}
 			}
 		}
 	}
 }
+}
+
+/**
+ * 「更多」海报墙入口卡：外形与竖屏海报完全一致（同样的宽高比与强调色描边），
+ * 放在该排第 20 个影片之后，选中即进入该目录的全屏海报墙。
+ */
+@Composable
+private fun MorePosterCard(
+	onClick: () -> Unit,
+	width: Dp,
+	modifier: Modifier = Modifier,
+) {
+	var focused by remember { mutableStateOf(false) }
+	Column(
+		modifier = modifier
+			.width(width)
+			.onFocusChanged { focused = it.hasFocus }
+			.clickable(onClick = onClick),
+		verticalArrangement = Arrangement.spacedBy(8.dp),
+	) {
+		Box(
+			modifier = Modifier
+				.width(width)
+				.height(width * 1.5f)
+				.clip(RoundedCornerShape(8.dp))
+				.background(
+					if (focused) JellyfinTheme.colorScheme.buttonFocused
+					else JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.16f),
+				)
+				.border(
+					width = if (focused) 3.dp else 0.dp,
+					color = if (focused) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
+					shape = RoundedCornerShape(8.dp),
+				),
+			contentAlignment = Alignment.Center,
+		) {
+			Column(
+				horizontalAlignment = Alignment.CenterHorizontally,
+				verticalArrangement = Arrangement.spacedBy(6.dp),
+			) {
+				Text(
+					"全部",
+					color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
+						else JellyfinTheme.colorScheme.onBackground,
+					style = JellyfinTheme.typography.default.copy(
+						fontWeight = FontWeight.Bold,
+						fontSize = 18.sp,
+					),
+				)
+				Text(
+					"海报墙 ›",
+					color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
+						else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+					style = JellyfinTheme.typography.default.copy(fontSize = 12.sp),
+				)
+			}
+		}
+		// 与海报下方名称占位对齐
+		Spacer(Modifier.height(20.dp))
+	}
 }
 
 @Composable
@@ -950,16 +998,42 @@ private fun PortraitPosterCard(
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
 	width: Dp = 200.dp,
+	onLongPress: () -> Unit = {},
 ) {
 	val api = koinInject<ApiClient>()
 	val image = item.itemImages.values.firstOrNull() ?: item.itemBackdropImages.firstOrNull()
 	var focused by remember { mutableStateOf(false) }
+	val scope = rememberCoroutineScope()
+	// 长按确定键 3 秒：在「竖屏/横幅」之间切换整排展示形式（遥控器无指针长按）。
+	var lpHeld by remember { mutableStateOf(false) }
+	var lpFired by remember { mutableStateOf(false) }
 
 	Column(
 		modifier = modifier
 			.width(width)
 			.onFocusChanged { focused = it.hasFocus }
-			.clickable(onClick = onClick),
+			.clickable(onClick = onClick)
+			.onKeyEvent { ev ->
+				val isSelect = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
+				if (!isSelect) return@onKeyEvent false
+				if (ev.type == KeyEventType.KeyDown) {
+					if (!lpHeld) {
+						lpHeld = true
+						lpFired = false
+						scope.launch {
+							delay(3_000)
+							if (lpHeld) {
+								lpFired = true
+								onLongPress()
+							}
+						}
+					}
+					true
+				} else {
+					lpHeld = false
+					if (lpFired) { lpFired = false; true } else false
+				}
+			},
 		verticalArrangement = Arrangement.spacedBy(8.dp),
 	) {
 		Box(
@@ -1006,16 +1080,41 @@ private fun LandscapeCard(
 	onClick: () -> Unit,
 	modifier: Modifier = Modifier,
 	width: Dp = 300.dp,
+	onLongPress: () -> Unit = {},
 ) {
 	val api = koinInject<ApiClient>()
 	val image = item.itemBackdropImages.firstOrNull() ?: item.itemImages.values.firstOrNull()
 	var focused by remember { mutableStateOf(false) }
+	val scope = rememberCoroutineScope()
+	var lpHeld by remember { mutableStateOf(false) }
+	var lpFired by remember { mutableStateOf(false) }
 
 	Column(
 		modifier = modifier
 			.width(width)
 			.onFocusChanged { focused = it.hasFocus }
-			.clickable(onClick = onClick),
+			.clickable(onClick = onClick)
+			.onKeyEvent { ev ->
+				val isSelect = ev.key == Key.DirectionCenter || ev.key == Key.Enter || ev.key == Key.NumPadEnter
+				if (!isSelect) return@onKeyEvent false
+				if (ev.type == KeyEventType.KeyDown) {
+					if (!lpHeld) {
+						lpHeld = true
+						lpFired = false
+						scope.launch {
+							delay(3_000)
+							if (lpHeld) {
+								lpFired = true
+								onLongPress()
+							}
+						}
+					}
+					true
+				} else {
+					lpHeld = false
+					if (lpFired) { lpFired = false; true } else false
+				}
+			},
 		verticalArrangement = Arrangement.spacedBy(8.dp),
 	) {
 		Box(
