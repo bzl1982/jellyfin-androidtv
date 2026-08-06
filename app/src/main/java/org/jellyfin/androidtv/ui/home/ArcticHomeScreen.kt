@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRestorer
@@ -69,6 +70,8 @@ import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.preference.HeroLayoutMode
 import org.jellyfin.androidtv.preference.HeroLayoutModePreferences
+import org.jellyfin.androidtv.preference.SidebarMode
+import org.jellyfin.androidtv.preference.SidebarModePreferences
 import org.jellyfin.androidtv.ui.base.CircularProgressIndicator
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
@@ -146,9 +149,11 @@ fun ArcticHomeScreen() {
 	var categoryLoading by remember { mutableStateOf(false) }
 
 	// Hero layout is a global preference (Settings -> Home -> FUSE 大舞台展示方式).
-	// Read it fresh on every (re)entry so a change made in Settings is picked up
-	// the next time the user lands on Home — no in-page switcher.
-	val heroLayoutMode = remember { HeroLayoutModePreferences.get(context) }
+	// The remote can also cycle it from the big stage: press RIGHT on the Info
+	// button 8 times to enter layout-switch mode, then RIGHT cycles the 6 modes.
+	// Writes go straight back to the preference store.
+	var heroLayoutMode by remember { mutableStateOf(HeroLayoutModePreferences.get(context)) }
+	val sidebarMode = remember { SidebarModePreferences.get(context) }
 
 	var homeHeroIndex by remember { mutableIntStateOf(0) }
 	var categoryHeroIndex by remember { mutableIntStateOf(0) }
@@ -209,12 +214,14 @@ fun ArcticHomeScreen() {
 					if (items.isEmpty() || startIndex >= total) break
 				}
 
-				// Featured stage: up to 12 newest items with an image.
+				// Featured stage: up to 7 newest items with an image. The big stage
+				// is capped at 7 — the remote steps through them with RIGHT on the
+				// Info button, and the 8th press enters layout-switch mode.
 				val featured = classified
 					.map { it.item }
 					.filter { it.itemBackdropImages.isNotEmpty() || it.itemImages.isNotEmpty() }
 					.distinctBy { it.id }
-					.take(12)
+					.take(7)
 
 				// Home rows: one row per program type, newest first.
 				val typeRows = ProgramType.entries.mapNotNull { type ->
@@ -247,7 +254,8 @@ fun ArcticHomeScreen() {
 		categoryHeroIndex = 0
 		withContext(Dispatchers.Default) {
 			val matching = allItems.filter { it.programType == cat.programType && it.bucket == cat.regionBucket }
-			val heroItems = matching.map { it.item }.distinctBy { it.id }
+			// Cap the category big stage at 7 too, same as the home one.
+			val heroItems = matching.map { it.item }.distinctBy { it.id }.take(7)
 			val rows = buildList {
 				// Visible sub-rows in configured order.
 				cat.subRows.filter { it.visible }.sortedBy { it.order }.forEach { sub ->
@@ -319,6 +327,12 @@ fun ArcticHomeScreen() {
 			categoryLoading = categoryLoading,
 			loaded = loaded,
 			heroLayoutMode = heroLayoutMode,
+			onHeroLayoutModeChange = { newMode ->
+				HeroLayoutModePreferences.set(context, newMode)
+				heroLayoutMode = newMode
+			},
+			sidebarExpanded = sidebarExpanded,
+			sidebarMode = sidebarMode,
 			heroHeight = heroHeight,
 			onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
 			onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
@@ -331,6 +345,7 @@ fun ArcticHomeScreen() {
 		ArcticSidebar(
 			expanded = sidebarExpanded,
 			onExpandedChange = { sidebarExpanded = it },
+			mode = sidebarMode,
 			itemFocusRequesters = sidebarItemFocus,
 			mainContentFocus = mainContentFocus,
 			config = menuConfig,
@@ -366,6 +381,7 @@ fun ArcticHomeScreen() {
 private fun ArcticSidebar(
 	expanded: Boolean,
 	onExpandedChange: (Boolean) -> Unit,
+	mode: SidebarMode,
 	itemFocusRequesters: List<FocusRequester>,
 	mainContentFocus: FocusRequester,
 	config: LorlaMenuConfig,
@@ -374,12 +390,19 @@ private fun ArcticSidebar(
 	onSettings: () -> Unit,
 	onCategory: (CategoryMenuConfig) -> Unit,
 ) {
+	// HIDDEN mode removes the rail entirely (Settings -> Home -> 左侧菜单显示方式).
+	if (mode == SidebarMode.HIDDEN) return
+
 	val categories = remember(config) {
 		config.categories.filter { it.visible }.sortedBy { it.order }
 	}
 
+	// ICONS_ONLY pins the rail at 64dp and never shows labels; ICONS_AND_LABELS
+	// animates 64 <-> 216 and shows labels when expanded.
+	val showLabels = mode == SidebarMode.ICONS_AND_LABELS
 	val targetWidth by animateDpAsState(
-		targetValue = if (expanded) 216.dp else 64.dp,
+		targetValue = if (mode == SidebarMode.ICONS_ONLY) 64.dp
+			else if (expanded) 216.dp else 64.dp,
 		animationSpec = tween(250),
 		label = "sidebar-width",
 	)
@@ -418,7 +441,7 @@ private fun ArcticSidebar(
 		SidebarItem(
 			icon = R.drawable.ic_house,
 			label = "首页",
-			expanded = expanded,
+			expanded = showLabels,
 			modifier = Modifier.focusRequester(itemFocusRequesters[0]),
 			onFocusChange = {
 				statesList[0].value = it
@@ -432,7 +455,7 @@ private fun ArcticSidebar(
 		SidebarItem(
 			icon = R.drawable.ic_search,
 			label = "搜索",
-			expanded = expanded,
+			expanded = showLabels,
 			modifier = Modifier.focusRequester(itemFocusRequesters[1]),
 			onFocusChange = { statesList[1].value = it },
 			onClick = onSearch,
@@ -441,7 +464,7 @@ private fun ArcticSidebar(
 			SidebarItem(
 				icon = cat.programType.iconRes(),
 				label = cat.label,
-				expanded = expanded,
+				expanded = showLabels,
 				modifier = Modifier.focusRequester(itemFocusRequesters[index + 2]),
 				onFocusChange = {
 					statesList[index + 2].value = it
@@ -456,7 +479,7 @@ private fun ArcticSidebar(
 		SidebarItem(
 			icon = R.drawable.ic_settings,
 			label = "系统设置",
-			expanded = expanded,
+			expanded = showLabels,
 			modifier = Modifier.focusRequester(itemFocusRequesters[categories.size + 2]),
 			onFocusChange = { statesList[categories.size + 2].value = it },
 			onClick = onSettings,
@@ -535,6 +558,9 @@ private fun ArcticMainContent(
 	categoryLoading: Boolean,
 	loaded: Boolean,
 	heroLayoutMode: HeroLayoutMode,
+	onHeroLayoutModeChange: (HeroLayoutMode) -> Unit,
+	sidebarExpanded: Boolean,
+	sidebarMode: SidebarMode,
 	heroHeight: Dp,
 	onItemClick: (BaseItemDto) -> Unit,
 	onHeroPlay: (BaseItemDto) -> Unit,
@@ -552,12 +578,24 @@ private fun ArcticMainContent(
 	var rowModesHome by remember { mutableStateOf<Map<String, RowLayoutMode>>(emptyMap()) }
 	var rowModesCategory by remember { mutableStateOf<Map<String, RowLayoutMode>>(emptyMap()) }
 
+	// When the rail expands, the whole page shifts right so it is never covered —
+	// the rail is an overlay, and the content simply makes room for it.
+	val contentLeft by animateDpAsState(
+		targetValue = when {
+			sidebarMode == SidebarMode.HIDDEN -> 0.dp
+			sidebarExpanded && sidebarMode == SidebarMode.ICONS_AND_LABELS -> 216.dp
+			else -> 64.dp
+		},
+		animationSpec = tween(250),
+		label = "content-left",
+	)
+
 	// One vertical scroll holds the hero (first screen) and all rows below it, so the
 	// whole page glides as a unit — exactly like Netflix's TV home.
 	Column(
 		Modifier
 			.fillMaxSize()
-			.padding(start = 64.dp)
+			.padding(start = contentLeft)
 			.then(modifier)
 			.verticalScroll(scrollState),
 	) {
@@ -569,6 +607,7 @@ private fun ArcticMainContent(
 			featuredCount = heroCount,
 			heroIndex = heroIndex,
 			layoutMode = heroLayoutMode,
+			onLayoutModeChange = onHeroLayoutModeChange,
 			onPlay = { heroItem?.let(onHeroPlay) },
 			onInfo = { heroItem?.let(onHeroInfo) },
 			onNextFeatured = {
@@ -648,6 +687,7 @@ private fun HeroStage(
 	featuredCount: Int,
 	heroIndex: Int,
 	layoutMode: HeroLayoutMode,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
 	onPlay: () -> Unit,
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
@@ -657,6 +697,42 @@ private fun HeroStage(
 	onDown: () -> Unit,
 ) {
 	val scope = rememberCoroutineScope()
+	val context = LocalContext.current
+	// Layout-switch state lives HERE (not in HeroControlRow): when the layout
+	// changes, the row below recomposes, but this stage does not, so the counter
+	// survives a switch.
+	var rightPressCount by remember { mutableIntStateOf(0) }
+	var switchingLayout by remember { mutableStateOf(false) }
+
+	val onInfoRight = {
+		if (switchingLayout) {
+			// Layout-switch mode: RIGHT cycles the 6 hero layouts (persisted).
+			val entries = HeroLayoutMode.entries
+			val next = entries[(HeroLayoutModePreferences.get(context).ordinal + 1) % entries.size]
+			onLayoutModeChange(next)
+			Toast.makeText(context, "大舞台：${next.label}", Toast.LENGTH_SHORT).show()
+		} else {
+			rightPressCount += 1
+			if (rightPressCount >= 8) {
+				// The 8th press enters layout-switch mode and applies one switch.
+				switchingLayout = true
+				rightPressCount = 0
+				val entries = HeroLayoutMode.entries
+				val next = entries[(HeroLayoutModePreferences.get(context).ordinal + 1) % entries.size]
+				onLayoutModeChange(next)
+				Toast.makeText(context, "大舞台：${next.label}（按其他键退出）", Toast.LENGTH_SHORT).show()
+			} else {
+				onNextFeatured()
+			}
+		}
+	}
+	val onExitLayoutSwitch = {
+		if (switchingLayout) {
+			switchingLayout = false
+			rightPressCount = 0
+		}
+	}
+
 	// When focus returns to the hero (e.g. UP from the first row), glide the whole
 	// page back to the top so the big stage is fully visible again.
 	Box(
@@ -672,9 +748,6 @@ private fun HeroStage(
 			modifier = Modifier.fillMaxSize(),
 		)
 
-		// Hero layout is selected in Settings -> Home -> FUSE 大舞台展示方式.
-		// It is NOT on this page, so the big stage stays clean.
-
 		when (layoutMode) {
 			HeroLayoutMode.FULL_BLEED_LEFT_INFO -> HeroInfoPanelLeft(
 				modifier = Modifier.fillMaxSize(),
@@ -685,6 +758,10 @@ private fun HeroStage(
 				onInfo = onInfo,
 				onNextFeatured = onNextFeatured,
 				onPreviousFeatured = onPreviousFeatured,
+				onLayoutModeChange = onLayoutModeChange,
+				switchingLayout = switchingLayout,
+				onInfoRight = onInfoRight,
+				onExitLayoutSwitch = onExitLayoutSwitch,
 				initialFocus = initialFocus,
 				onDown = onDown,
 			)
@@ -698,6 +775,11 @@ private fun HeroStage(
 				onInfo = onInfo,
 				onNextFeatured = onNextFeatured,
 				onPreviousFeatured = onPreviousFeatured,
+				onLayoutModeChange = onLayoutModeChange,
+				switchingLayout = switchingLayout,
+				onInfoRight = onInfoRight,
+				onExitLayoutSwitch = onExitLayoutSwitch,
+				initialFocus = initialFocus,
 				onDown = onDown,
 			)
 
@@ -710,6 +792,10 @@ private fun HeroStage(
 				onInfo = onInfo,
 				onNextFeatured = onNextFeatured,
 				onPreviousFeatured = onPreviousFeatured,
+				onLayoutModeChange = onLayoutModeChange,
+				switchingLayout = switchingLayout,
+				onInfoRight = onInfoRight,
+				onExitLayoutSwitch = onExitLayoutSwitch,
 				initialFocus = initialFocus,
 				onDown = onDown,
 			)
@@ -723,6 +809,10 @@ private fun HeroStage(
 				onInfo = onInfo,
 				onNextFeatured = onNextFeatured,
 				onPreviousFeatured = onPreviousFeatured,
+				onLayoutModeChange = onLayoutModeChange,
+				switchingLayout = switchingLayout,
+				onInfoRight = onInfoRight,
+				onExitLayoutSwitch = onExitLayoutSwitch,
 				initialFocus = initialFocus,
 				onDown = onDown,
 			)
@@ -734,6 +824,10 @@ private fun HeroStage(
 				onInfo = onInfo,
 				onNextFeatured = onNextFeatured,
 				onPreviousFeatured = onPreviousFeatured,
+				onLayoutModeChange = onLayoutModeChange,
+				switchingLayout = switchingLayout,
+				onInfoRight = onInfoRight,
+				onExitLayoutSwitch = onExitLayoutSwitch,
 				initialFocus = initialFocus,
 				onDown = onDown,
 			)
@@ -745,6 +839,10 @@ private fun HeroStage(
 				onInfo = onInfo,
 				onNextFeatured = onNextFeatured,
 				onPreviousFeatured = onPreviousFeatured,
+				onLayoutModeChange = onLayoutModeChange,
+				switchingLayout = switchingLayout,
+				onInfoRight = onInfoRight,
+				onExitLayoutSwitch = onExitLayoutSwitch,
 				initialFocus = initialFocus,
 				onDown = onDown,
 			)
@@ -815,6 +913,10 @@ private fun HeroInfoPanelLeft(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
+	switchingLayout: Boolean,
+	onInfoRight: () -> Unit,
+	onExitLayoutSwitch: () -> Unit,
 	initialFocus: FocusRequester,
 	onDown: () -> Unit,
 ) {
@@ -878,6 +980,10 @@ private fun HeroInfoPanelLeft(
 			onInfo = onInfo,
 			onNextFeatured = onNextFeatured,
 			onPreviousFeatured = onPreviousFeatured,
+			onLayoutModeChange = onLayoutModeChange,
+			switchingLayout = switchingLayout,
+			onInfoRight = onInfoRight,
+			onExitLayoutSwitch = onExitLayoutSwitch,
 			initialFocus = initialFocus,
 		)
 	}
@@ -893,6 +999,11 @@ private fun HeroInfoPanelCenter(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
+	switchingLayout: Boolean,
+	onInfoRight: () -> Unit,
+	onExitLayoutSwitch: () -> Unit,
+	initialFocus: FocusRequester,
 	onDown: () -> Unit,
 ) {
 	val bringIntoViewRequester = remember { BringIntoViewRequester() }
@@ -947,6 +1058,11 @@ private fun HeroInfoPanelCenter(
 			onInfo = onInfo,
 			onNextFeatured = onNextFeatured,
 			onPreviousFeatured = onPreviousFeatured,
+			onLayoutModeChange = onLayoutModeChange,
+			switchingLayout = switchingLayout,
+			onInfoRight = onInfoRight,
+			onExitLayoutSwitch = onExitLayoutSwitch,
+			initialFocus = initialFocus,
 		)
 	}
 }
@@ -961,6 +1077,10 @@ private fun HeroPosterShowcase(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
+	switchingLayout: Boolean,
+	onInfoRight: () -> Unit,
+	onExitLayoutSwitch: () -> Unit,
 	initialFocus: FocusRequester,
 	onDown: () -> Unit,
 ) {
@@ -1035,15 +1155,19 @@ private fun HeroPosterShowcase(
 							}
 						}
 					},
-				onDown = onDown,
-				featuredCount = featuredCount,
-				heroIndex = heroIndex,
-				onPlay = onPlay,
-				onInfo = onInfo,
-				onNextFeatured = onNextFeatured,
-				onPreviousFeatured = onPreviousFeatured,
-				initialFocus = initialFocus,
-			)
+			onDown = onDown,
+			featuredCount = featuredCount,
+			heroIndex = heroIndex,
+			onPlay = onPlay,
+			onInfo = onInfo,
+			onNextFeatured = onNextFeatured,
+			onPreviousFeatured = onPreviousFeatured,
+			onLayoutModeChange = onLayoutModeChange,
+			switchingLayout = switchingLayout,
+			onInfoRight = onInfoRight,
+			onExitLayoutSwitch = onExitLayoutSwitch,
+			initialFocus = initialFocus,
+		)
 		}
 	}
 }
@@ -1058,6 +1182,10 @@ private fun HeroLandscapeShowcase(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
+	switchingLayout: Boolean,
+	onInfoRight: () -> Unit,
+	onExitLayoutSwitch: () -> Unit,
 	initialFocus: FocusRequester,
 	onDown: () -> Unit,
 ) {
@@ -1132,6 +1260,10 @@ private fun HeroLandscapeShowcase(
 			onInfo = onInfo,
 			onNextFeatured = onNextFeatured,
 			onPreviousFeatured = onPreviousFeatured,
+			onLayoutModeChange = onLayoutModeChange,
+			switchingLayout = switchingLayout,
+			onInfoRight = onInfoRight,
+			onExitLayoutSwitch = onExitLayoutSwitch,
 			initialFocus = initialFocus,
 		)
 	}
@@ -1145,6 +1277,10 @@ private fun HeroMinimalTitle(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
+	switchingLayout: Boolean,
+	onInfoRight: () -> Unit,
+	onExitLayoutSwitch: () -> Unit,
 	initialFocus: FocusRequester,
 	onDown: () -> Unit,
 ) {
@@ -1189,6 +1325,10 @@ private fun HeroMinimalTitle(
 			onInfo = onInfo,
 			onNextFeatured = onNextFeatured,
 			onPreviousFeatured = onPreviousFeatured,
+			onLayoutModeChange = onLayoutModeChange,
+			switchingLayout = switchingLayout,
+			onInfoRight = onInfoRight,
+			onExitLayoutSwitch = onExitLayoutSwitch,
 			initialFocus = initialFocus,
 		)
 	}
@@ -1202,6 +1342,10 @@ private fun HeroWithNavPills(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
+	switchingLayout: Boolean,
+	onInfoRight: () -> Unit,
+	onExitLayoutSwitch: () -> Unit,
 	initialFocus: FocusRequester,
 	onDown: () -> Unit,
 ) {
@@ -1253,6 +1397,10 @@ private fun HeroWithNavPills(
 			onInfo = onInfo,
 			onNextFeatured = onNextFeatured,
 			onPreviousFeatured = onPreviousFeatured,
+			onLayoutModeChange = onLayoutModeChange,
+			switchingLayout = switchingLayout,
+			onInfoRight = onInfoRight,
+			onExitLayoutSwitch = onExitLayoutSwitch,
 			initialFocus = initialFocus,
 		)
 
@@ -1338,17 +1486,46 @@ private fun HeroControlRow(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
+	switchingLayout: Boolean,
+	onInfoRight: () -> Unit,
+	onExitLayoutSwitch: () -> Unit,
 	initialFocus: FocusRequester? = null,
 ) {
+	// Remote interaction model for the big stage:
+	//  - The only focusable control on the hero is the "更多信息" button (the play
+	//    pill is decorative; the dots are never focusable).
+	//  - RIGHT on Info: step to the next featured item (the dots advance with it).
+	//  - The 8th RIGHT press enters layout-switch mode: every further RIGHT cycles
+	//    the 6 hero layouts (persisted). Any key other than RIGHT exits the mode.
+	// The counter/state live in HeroStage so they survive a layout switch.
+
+	// Re-grab focus on the Info button whenever this row (re)enters composition,
+	// which happens after a layout switch — keeps the remote on the one control.
+	LaunchedEffect(Unit) {
+		if (initialFocus != null) runCatching { initialFocus.requestFocus() }
+	}
+
 	Row(
 		horizontalArrangement = Arrangement.spacedBy(12.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		modifier = modifier
 			.fillMaxWidth()
 			.onPreviewKeyEvent {
-				if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown) {
-					onDown()
-					true
+				if (it.type == KeyEventType.KeyDown) {
+					when (it.key) {
+						Key.DirectionDown -> {
+							// Any key that is not RIGHT also exits layout-switch mode.
+							onExitLayoutSwitch()
+							onDown()
+							true
+						}
+						Key.DirectionRight -> false // handled by the Info button itself
+						else -> {
+							onExitLayoutSwitch()
+							false
+						}
+					}
 				} else {
 					false
 				}
@@ -1358,19 +1535,19 @@ private fun HeroControlRow(
 			label = "播放",
 			iconRes = R.drawable.ic_play,
 			isPrimary = true,
+			canFocus = false,
 			onClick = onPlay,
-			onLeft = onPreviousFeatured,
-			onDown = onDown,
-			focusRequester = initialFocus,
 		)
 
 		HeroPillButton(
-			label = "更多信息",
+			label = if (switchingLayout) "切换展示形式" else "更多信息",
 			iconRes = R.drawable.ic_info,
 			isPrimary = false,
+			canFocus = true,
 			onClick = onInfo,
-			onRight = onNextFeatured,
+			onRight = onInfoRight,
 			onDown = onDown,
+			focusRequester = initialFocus,
 		)
 
 		if (featuredCount > 1) {
@@ -1400,6 +1577,7 @@ private fun HeroPillButton(
 	iconRes: Int,
 	isPrimary: Boolean,
 	onClick: () -> Unit,
+	canFocus: Boolean = true,
 	onLeft: (() -> Unit)? = null,
 	onRight: (() -> Unit)? = null,
 	onDown: (() -> Unit)? = null,
@@ -1427,6 +1605,7 @@ private fun HeroPillButton(
 	Row(
 		modifier = Modifier
 			.then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+			.then(if (canFocus) Modifier.focusRestorer() else Modifier.focusProperties { canFocus = false })
 			.height(44.dp)
 			.background(bg, shape)
 			.border(
@@ -1434,9 +1613,9 @@ private fun HeroPillButton(
 				color = borderColor,
 				shape = shape,
 			)
-			.onFocusChanged { focused = it.hasFocus }
+			.then(if (canFocus) Modifier.onFocusChanged { focused = it.hasFocus } else Modifier)
 			.onPreviewKeyEvent {
-				if (it.type == KeyEventType.KeyDown) {
+				if (it.type == KeyEventType.KeyDown && canFocus) {
 					when (it.key) {
 						Key.DirectionLeft -> {
 							onLeft?.invoke()

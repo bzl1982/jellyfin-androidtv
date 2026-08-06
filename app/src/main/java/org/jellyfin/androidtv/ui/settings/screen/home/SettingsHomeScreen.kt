@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.preference.HeroLayoutMode
 import org.jellyfin.androidtv.preference.HeroLayoutModePreferences
+import org.jellyfin.androidtv.preference.SidebarMode
+import org.jellyfin.androidtv.preference.SidebarModePreferences
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.list.ListButton
 import org.jellyfin.androidtv.ui.base.list.ListSection
@@ -53,6 +55,25 @@ fun SettingsHomeScreen() {
 		}
 
 		item {
+			// Left-rail display mode: hidden / icons-only / icons+labels. When the
+			// rail expands the whole page shifts right, so it never covers content.
+			Column(
+				modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+				verticalArrangement = Arrangement.spacedBy(2.dp),
+			) {
+				FuseSectionHeader(text = "左侧菜单显示方式")
+				SidebarMode.entries.forEach { mode ->
+					FuseRadioOption(
+						title = mode.label,
+						subtitle = sidebarSubtitleFor(mode),
+						selected = SidebarModePreferences.get(context) == mode,
+						onClick = { SidebarModePreferences.set(context, mode) },
+					)
+				}
+			}
+		}
+
+		item {
 			ListSection(
 				overlineContent = { Text(stringResource(R.string.pref_customization).uppercase()) },
 				headingContent = { Text(stringResource(R.string.home_prefs)) },
@@ -77,4 +98,10 @@ private fun subtitleFor(mode: HeroLayoutMode): String = when (mode) {
 	HeroLayoutMode.LANDSCAPE_SHOWCASE -> "横幅大图 + 下方信息面板"
 	HeroLayoutMode.MINIMAL_TITLE -> "极简：只显示大标题，按钮居中"
 	HeroLayoutMode.FULL_BLEED_WITH_NAV_PILLS -> "全屏海报 + 底部分类胶囊导航"
+}
+
+private fun sidebarSubtitleFor(mode: SidebarMode): String = when (mode) {
+	SidebarMode.HIDDEN -> "完全隐藏左侧菜单，内容占满全屏"
+	SidebarMode.ICONS_ONLY -> "只显示图标（64dp 窄栏，不展开文字）"
+	SidebarMode.ICONS_AND_LABELS -> "默认：展开时显示图标+文字，整页右移"
 }
