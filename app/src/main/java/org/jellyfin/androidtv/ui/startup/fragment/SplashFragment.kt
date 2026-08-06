@@ -26,21 +26,16 @@ import org.jellyfin.androidtv.ui.base.JellyfinTheme
 @Composable
 fun SplashScreen() {
 	Box(
-		modifier = Modifier.background(colorResource(id = R.color.not_quite_black)),
+		modifier = Modifier
+			.fillMaxSize()
+			.background(colorResource(id = R.color.black)),
+		contentAlignment = Alignment.Center,
 	) {
-		Column(
-			horizontalAlignment = Alignment.CenterHorizontally,
-			verticalArrangement = Arrangement.Center,
+		Image(
+			painter = painterResource(R.drawable.lorla_splash),
+			contentDescription = stringResource(R.string.app_name),
 			modifier = Modifier.fillMaxSize(),
-		) {
-			Image(
-				painter = painterResource(R.drawable.app_logo),
-				contentDescription = stringResource(R.string.app_name),
-				modifier = Modifier
-					.width(400.dp)
-					.fillMaxHeight()
-			)
-		}
+		)
 	}
 }
 
