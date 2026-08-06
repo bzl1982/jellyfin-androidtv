@@ -1007,8 +1007,15 @@ private fun HeroShowcaseCollage(
 	LaunchedEffect(item?.id) {
 		people = emptyList()
 		if (item?.id != null) {
+			// Fetch ONLY this item's people (single-id Items request with the
+			// PEOPLE field) — bundling People into the whole home list made the
+			// response huge and hung the screen.
 			runCatching {
-				api.itemsApi.getPeople(itemId = item.id).content.items.orEmpty()
+				api.itemsApi.getItems(
+					ids = setOf(item.id),
+					fields = setOf(ItemFields.PEOPLE),
+					recursive = true,
+				).content.items.orEmpty().firstOrNull()?.people.orEmpty()
 			}.getOrElse { emptyList() }.take(9).let { people = it }
 		}
 	}
