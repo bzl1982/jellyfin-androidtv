@@ -41,6 +41,7 @@ import org.jellyfin.androidtv.ui.composable.rememberPlayerPositionInfo
 import org.jellyfin.androidtv.ui.player.base.PlayerSeekbar
 import org.jellyfin.playback.core.PlaybackManager
 import org.jellyfin.playback.core.model.PlayState
+import org.jellyfin.playback.core.queue.queue
 import org.koin.compose.koinInject
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -51,6 +52,7 @@ fun VideoPlayerControls(
 	playbackManager: PlaybackManager = koinInject(),
 	onPlaybackInfoClick: () -> Unit = {},
 ) {
+	val playState by playbackManager.state.playState.collectAsState()
 	val accent = JellyfinTheme.colorScheme.rangeControlFill
 
 	Column(
