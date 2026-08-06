@@ -254,7 +254,7 @@ fun ArcticHomeScreen() {
 					if (items.isEmpty()) null else ArcticRow(type.label, items)
 				}
 				// 初次进入只生成前几个栏目，减轻一次性渲染压力；其余在设置里开启。
-				val visibleRows = if (HomeRowsPreferences.get(context)) typeRows else typeRows.take(HOME_ROWS_INITIAL)
+				val visibleRows = if (HomeRowsPreferences.getLoadAll(context)) typeRows else typeRows.take(HOME_ROWS_INITIAL)
 
 				withContext(Dispatchers.Main) {
 					allItems = classified
