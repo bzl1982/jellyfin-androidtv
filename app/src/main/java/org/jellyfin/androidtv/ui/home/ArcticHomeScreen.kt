@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -93,6 +92,7 @@ import org.koin.compose.koinInject
 data class ArcticRow(
 	val title: String,
 	val items: List<BaseItemDto>,
+	val layoutMode: RowLayoutMode = RowLayoutMode.PORTRAIT,
 )
 
 private data class ClassifiedItem(
@@ -103,30 +103,48 @@ private data class ClassifiedItem(
 )
 
 /**
- * Six home layout modes translated from the FUSE 2 reference screenshots.
- * Mode 5 (LARGE_LANDSCAPE) is the full-screen hero mode and hides the rows below it.
+ * Six hero/billboard layouts translated from the FUSE reference screenshots.
+ * Cycling this changes ONLY the big stage at the top, never the rows below.
  */
-private enum class HomeLayoutMode {
-	PORTRAIT_POSTERS,
-	WIDE_INFO_CARDS,
-	LANDSCAPE_CARDS,
-	CIRCULAR_DISCS,
-	PORTRAIT_WITH_BAR,
-	LARGE_LANDSCAPE,
+private enum class HeroLayoutMode {
+	FULL_BLEED_LEFT_INFO,
+	FULL_BLEED_CENTER_INFO,
+	POSTER_SHOWCASE,
+	LANDSCAPE_SHOWCASE,
+	MINIMAL_TITLE,
+	FULL_BLEED_WITH_NAV_PILLS,
 }
 
-private val HomeLayoutMode.label: String
+private val HeroLayoutMode.label: String
 	get() = when (this) {
-		HomeLayoutMode.PORTRAIT_POSTERS -> "竖版海报"
-		HomeLayoutMode.WIDE_INFO_CARDS -> "宽信息卡"
-		HomeLayoutMode.LANDSCAPE_CARDS -> "横向海报"
-		HomeLayoutMode.CIRCULAR_DISCS -> "圆形光盘"
-		HomeLayoutMode.PORTRAIT_WITH_BAR -> "竖版+信息栏"
-		HomeLayoutMode.LARGE_LANDSCAPE -> "大海报"
+		HeroLayoutMode.FULL_BLEED_LEFT_INFO -> "全屏海报+左信息"
+		HeroLayoutMode.FULL_BLEED_CENTER_INFO -> "全屏海报+居中信息"
+		HeroLayoutMode.POSTER_SHOWCASE -> "海报展示"
+		HeroLayoutMode.LANDSCAPE_SHOWCASE -> "横幅展示"
+		HeroLayoutMode.MINIMAL_TITLE -> "极简标题"
+		HeroLayoutMode.FULL_BLEED_WITH_NAV_PILLS -> "全屏海报+底部导航"
 	}
 
-private val HomeLayoutMode.isFullScreenHero: Boolean
-	get() = this == HomeLayoutMode.LARGE_LANDSCAPE
+/**
+ * Rows below the hero support only two display modes.
+ * Each row stores its own mode so one wall can mix portrait and landscape rows.
+ */
+private enum class RowLayoutMode {
+	PORTRAIT,
+	LANDSCAPE,
+}
+
+private val RowLayoutMode.label: String
+	get() = when (this) {
+		RowLayoutMode.PORTRAIT -> "竖屏"
+		RowLayoutMode.LANDSCAPE -> "横幅"
+	}
+
+private val RowLayoutMode.next: RowLayoutMode
+	get() = when (this) {
+		RowLayoutMode.PORTRAIT -> RowLayoutMode.LANDSCAPE
+		RowLayoutMode.LANDSCAPE -> RowLayoutMode.PORTRAIT
+	}
 
 // endregion
 
@@ -148,7 +166,7 @@ fun ArcticHomeScreen() {
 	var categoryRows by remember { mutableStateOf<List<ArcticRow>>(emptyList()) }
 	var categoryLoading by remember { mutableStateOf(false) }
 
-	var layoutMode by remember { mutableStateOf(HomeLayoutMode.PORTRAIT_POSTERS) }
+	var heroLayoutMode by remember { mutableStateOf(HeroLayoutMode.FULL_BLEED_LEFT_INFO) }
 	var homeHeroIndex by remember { mutableIntStateOf(0) }
 	var categoryHeroIndex by remember { mutableIntStateOf(0) }
 	var sidebarExpanded by remember { mutableStateOf(false) }
@@ -185,11 +203,11 @@ fun ArcticHomeScreen() {
 						recursive = true,
 						includeItemTypes = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
 						fields = setOf(
-						ItemFields.PRODUCTION_LOCATIONS,
-						ItemFields.GENRES,
-						ItemFields.OVERVIEW,
-						ItemFields.DATE_CREATED,
-						ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
+							ItemFields.PRODUCTION_LOCATIONS,
+							ItemFields.GENRES,
+							ItemFields.OVERVIEW,
+							ItemFields.DATE_CREATED,
+							ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
 						),
 						sortBy = setOf(ItemSortBy.DATE_CREATED),
 						sortOrder = setOf(SortOrder.DESCENDING),
@@ -317,12 +335,12 @@ fun ArcticHomeScreen() {
 			categoryRows = categoryRows,
 			categoryLoading = categoryLoading,
 			loaded = loaded,
-			layoutMode = layoutMode,
+			heroLayoutMode = heroLayoutMode,
+			onHeroLayoutModeChange = { heroLayoutMode = it },
 			heroHeight = heroHeight,
 			onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
 			onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
 			onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
-			onCycleLayoutMode = { layoutMode = HomeLayoutMode.entries[(layoutMode.ordinal + 1) % HomeLayoutMode.entries.size] },
 			initialFocus = mainContentFocus,
 			homeSidebarFocus = homeSidebarFocus,
 			categorySidebarFocus = categorySidebarFocus,
@@ -534,12 +552,12 @@ private fun ArcticMainContent(
 	categoryRows: List<ArcticRow>,
 	categoryLoading: Boolean,
 	loaded: Boolean,
-	layoutMode: HomeLayoutMode,
+	heroLayoutMode: HeroLayoutMode,
+	onHeroLayoutModeChange: (HeroLayoutMode) -> Unit,
 	heroHeight: Dp,
 	onItemClick: (BaseItemDto) -> Unit,
 	onHeroPlay: (BaseItemDto) -> Unit,
 	onHeroInfo: (BaseItemDto) -> Unit,
-	onCycleLayoutMode: () -> Unit,
 	initialFocus: FocusRequester,
 	homeSidebarFocus: FocusRequester,
 	categorySidebarFocus: FocusRequester,
@@ -548,6 +566,10 @@ private fun ArcticMainContent(
 	LaunchedEffect(selectedCategory) {
 		runCatching { scrollState.scrollTo(0) }
 	}
+
+	// Local mutable copy of row modes so each row can toggle independently.
+	var rowModesHome by remember { mutableStateOf<Map<String, RowLayoutMode>>(emptyMap()) }
+	var rowModesCategory by remember { mutableStateOf<Map<String, RowLayoutMode>>(emptyMap()) }
 
 	// One vertical scroll holds the hero (first screen) and all rows below it, so the
 	// whole page glides as a unit — exactly like Netflix's TV home.
@@ -558,12 +580,6 @@ private fun ArcticMainContent(
 			.then(modifier)
 			.verticalScroll(scrollState),
 	) {
-		val isHome = selectedCategory == null
-		val showRows = when {
-			!isHome -> true
-			else -> !layoutMode.isFullScreenHero
-		}
-
 		HeroStage(
 			modifier = Modifier
 				.fillMaxWidth()
@@ -571,7 +587,8 @@ private fun ArcticMainContent(
 			item = heroItem,
 			featuredCount = heroCount,
 			heroIndex = heroIndex,
-			layoutMode = layoutMode,
+			layoutMode = heroLayoutMode,
+			onLayoutModeChange = onHeroLayoutModeChange,
 			onPlay = { heroItem?.let(onHeroPlay) },
 			onInfo = { heroItem?.let(onHeroInfo) },
 			onNextFeatured = {
@@ -580,56 +597,60 @@ private fun ArcticMainContent(
 			onPreviousFeatured = {
 				if (heroCount > 0) onHeroIndexChange((heroIndex - 1 + heroCount) % heroCount)
 			},
-			onCycleLayoutMode = onCycleLayoutMode,
 			initialFocus = initialFocus,
 			scrollState = scrollState,
 			onDown = { runCatching { firstRowFocus.requestFocus() } },
 		)
 
-		if (showRows) {
-			if (!loaded || (selectedCategory != null && categoryLoading)) {
-				Box(
-					Modifier
-						.fillMaxWidth()
-						.padding(top = 24.dp),
-					contentAlignment = Alignment.Center,
-				) {
-					CircularProgressIndicator(
-						modifier = Modifier.size(40.dp),
-						color = JellyfinTheme.colorScheme.buttonFocused,
-					)
-				}
-			} else if (selectedCategory != null && categoryRows.isEmpty()) {
-				Box(
-					Modifier
-						.fillMaxWidth()
-						.padding(top = 24.dp),
-					contentAlignment = Alignment.Center,
-				) {
-					Text(
-						"暂无内容",
-						color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-						style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
-					)
-				}
-			} else {
-				// Leftmost poster of ANY row jumps to the rail item that matches the
-				// current view: Home row -> Home entry, category row -> that category.
-				val rowSidebarFocus = if (selectedCategory == null) homeSidebarFocus else categorySidebarFocus
-				val rows = if (selectedCategory != null) categoryRows else homeRows
-				rows.forEachIndexed { index, row ->
-					ArcticRowView(
-						title = row.title,
-						items = row.items,
-						layoutMode = layoutMode,
-						onItemClick = onItemClick,
-						index = index,
-						isFirstRow = index == 0,
-						heroFocus = initialFocus,
-						sidebarFocus = rowSidebarFocus,
-						firstRowFocus = if (index == 0) firstRowFocus else null,
-					)
-				}
+		if (!loaded || (selectedCategory != null && categoryLoading)) {
+			Box(
+				Modifier
+					.fillMaxWidth()
+					.padding(top = 24.dp),
+				contentAlignment = Alignment.Center,
+			) {
+				CircularProgressIndicator(
+					modifier = Modifier.size(40.dp),
+					color = JellyfinTheme.colorScheme.buttonFocused,
+				)
+			}
+		} else if (selectedCategory != null && categoryRows.isEmpty()) {
+			Box(
+				Modifier
+					.fillMaxWidth()
+					.padding(top = 24.dp),
+				contentAlignment = Alignment.Center,
+			) {
+				Text(
+					"暂无内容",
+					color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+					style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
+				)
+			}
+		} else {
+			// Leftmost poster of ANY row jumps to the rail item that matches the
+			// current view: Home row -> Home entry, category row -> that category.
+			val rowSidebarFocus = if (selectedCategory == null) homeSidebarFocus else categorySidebarFocus
+			val rows = if (selectedCategory != null) categoryRows else homeRows
+			val rowModes = if (selectedCategory != null) rowModesCategory else rowModesHome
+			val setRowModes = if (selectedCategory != null) { modes: Map<String, RowLayoutMode> -> rowModesCategory = modes } else { modes: Map<String, RowLayoutMode> -> rowModesHome = modes }
+
+			rows.forEachIndexed { index, row ->
+				val mode = rowModes[row.title] ?: row.layoutMode
+				ArcticRowView(
+					title = row.title,
+					items = row.items,
+					layoutMode = mode,
+					onLayoutModeChange = { newMode ->
+						setRowModes(rowModes.toMutableMap().apply { put(row.title, newMode) })
+					},
+					onItemClick = onItemClick,
+					index = index,
+					isFirstRow = index == 0,
+					heroFocus = initialFocus,
+					sidebarFocus = rowSidebarFocus,
+					firstRowFocus = if (index == 0) firstRowFocus else null,
+				)
 			}
 		}
 		Spacer(Modifier.height(48.dp))
@@ -646,12 +667,12 @@ private fun HeroStage(
 	item: BaseItemDto?,
 	featuredCount: Int,
 	heroIndex: Int,
-	layoutMode: HomeLayoutMode,
+	layoutMode: HeroLayoutMode,
+	onLayoutModeChange: (HeroLayoutMode) -> Unit,
 	onPlay: () -> Unit,
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
-	onCycleLayoutMode: () -> Unit,
 	initialFocus: FocusRequester,
 	scrollState: ScrollState,
 	onDown: () -> Unit,
@@ -672,28 +693,90 @@ private fun HeroStage(
 			modifier = Modifier.fillMaxSize(),
 		)
 
-		ArcticInfoPanel(
+		// Small style switcher in the top-right corner. It is NOT on the bottom
+		// control row, so it does not clutter the play/info/dots row.
+		HeroStyleSwitcher(
+			current = layoutMode,
+			onChange = onLayoutModeChange,
 			modifier = Modifier
-				.fillMaxWidth()
-				.padding(
-					start = 24.dp,
-					top = 120.dp,
-					end = view_pad_dp,
-					bottom = 60.dp,
-				)
-				.align(Alignment.BottomStart),
-			item = item,
-			featuredCount = featuredCount,
-			heroIndex = heroIndex,
-			onPlay = onPlay,
-			onInfo = onInfo,
-			onNextFeatured = onNextFeatured,
-			onPreviousFeatured = onPreviousFeatured,
-			onCycleLayoutMode = onCycleLayoutMode,
-			layoutMode = layoutMode,
-			initialFocus = initialFocus,
-			onDown = onDown,
+				.align(Alignment.TopEnd)
+				.padding(top = 24.dp, end = 24.dp),
 		)
+
+		when (layoutMode) {
+			HeroLayoutMode.FULL_BLEED_LEFT_INFO -> HeroInfoPanelLeft(
+				modifier = Modifier.fillMaxSize(),
+				item = item,
+				featuredCount = featuredCount,
+				heroIndex = heroIndex,
+				onPlay = onPlay,
+				onInfo = onInfo,
+				onNextFeatured = onNextFeatured,
+				onPreviousFeatured = onPreviousFeatured,
+				initialFocus = initialFocus,
+				onDown = onDown,
+			)
+
+			HeroLayoutMode.FULL_BLEED_CENTER_INFO -> HeroInfoPanelCenter(
+				modifier = Modifier.fillMaxSize(),
+				item = item,
+				featuredCount = featuredCount,
+				heroIndex = heroIndex,
+				onPlay = onPlay,
+				onInfo = onInfo,
+				onNextFeatured = onNextFeatured,
+				onPreviousFeatured = onPreviousFeatured,
+				onDown = onDown,
+			)
+
+			HeroLayoutMode.POSTER_SHOWCASE -> HeroPosterShowcase(
+				modifier = Modifier.fillMaxSize(),
+				item = item,
+				featuredCount = featuredCount,
+				heroIndex = heroIndex,
+				onPlay = onPlay,
+				onInfo = onInfo,
+				onNextFeatured = onNextFeatured,
+				onPreviousFeatured = onPreviousFeatured,
+				initialFocus = initialFocus,
+				onDown = onDown,
+			)
+
+			HeroLayoutMode.LANDSCAPE_SHOWCASE -> HeroLandscapeShowcase(
+				modifier = Modifier.fillMaxSize(),
+				item = item,
+				featuredCount = featuredCount,
+				heroIndex = heroIndex,
+				onPlay = onPlay,
+				onInfo = onInfo,
+				onNextFeatured = onNextFeatured,
+				onPreviousFeatured = onPreviousFeatured,
+				initialFocus = initialFocus,
+				onDown = onDown,
+			)
+
+			HeroLayoutMode.MINIMAL_TITLE -> HeroMinimalTitle(
+				modifier = Modifier.fillMaxSize(),
+				item = item,
+				onPlay = onPlay,
+				onInfo = onInfo,
+				onNextFeatured = onNextFeatured,
+				onPreviousFeatured = onPreviousFeatured,
+				initialFocus = initialFocus,
+				onDown = onDown,
+			)
+
+			HeroLayoutMode.FULL_BLEED_WITH_NAV_PILLS -> HeroWithNavPills(
+				modifier = Modifier.fillMaxSize(),
+				item = item,
+				onPlay = onPlay,
+				onInfo = onInfo,
+				onNextFeatured = onNextFeatured,
+				onPreviousFeatured = onPreviousFeatured,
+				initialFocus = initialFocus,
+				onDown = onDown,
+			)
+		}
 	}
 }
 
@@ -751,7 +834,61 @@ private fun HeroBackground(
 }
 
 @Composable
-private fun ArcticInfoPanel(
+private fun HeroStyleSwitcher(
+	current: HeroLayoutMode,
+	onChange: (HeroLayoutMode) -> Unit,
+	modifier: Modifier = Modifier,
+) {
+	var focused by remember { mutableStateOf(false) }
+
+	Row(
+		modifier = modifier
+			.height(36.dp)
+			.background(
+				if (focused) JellyfinTheme.colorScheme.buttonFocused
+				else JellyfinTheme.colorScheme.background.copy(alpha = 0.45f),
+				RoundedCornerShape(10.dp),
+			)
+			.border(
+				width = 1.dp,
+				color = if (focused) Color.Transparent
+					else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.35f),
+				shape = RoundedCornerShape(10.dp),
+			)
+			.onFocusChanged { focused = it.hasFocus }
+			.clickable {
+				val entries = HeroLayoutMode.entries
+				onChange(entries[(current.ordinal + 1) % entries.size])
+			}
+			.padding(horizontal = 12.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(8.dp),
+	) {
+		Text(
+			current.label,
+			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
+				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.80f),
+			style = JellyfinTheme.typography.default.copy(
+				fontSize = 12.sp,
+				fontWeight = FontWeight.SemiBold,
+			),
+			maxLines = 1,
+		)
+		Text(
+			"⇄",
+			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
+				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+			style = JellyfinTheme.typography.default.copy(
+				fontSize = 13.sp,
+				fontWeight = FontWeight.Bold,
+			),
+		)
+	}
+}
+
+@Composable
+private fun HeroInfoPanelLeft(
+	modifier: Modifier = Modifier,
 	item: BaseItemDto?,
 	featuredCount: Int,
 	heroIndex: Int,
@@ -759,19 +896,21 @@ private fun ArcticInfoPanel(
 	onInfo: () -> Unit,
 	onNextFeatured: () -> Unit,
 	onPreviousFeatured: () -> Unit,
-	onCycleLayoutMode: () -> Unit,
-	layoutMode: HomeLayoutMode,
 	initialFocus: FocusRequester,
 	onDown: () -> Unit,
-	modifier: Modifier = Modifier,
 ) {
-	// rememberBringIntoViewRequester: when focus enters the button row below, the
-	// parent scroll container scrolls the row fully into view (and the hero above it).
 	val bringIntoViewRequester = remember { BringIntoViewRequester() }
 	val bringIntoViewScope = rememberCoroutineScope()
 
 	Column(
-		modifier = modifier.fillMaxHeight(),
+		modifier = modifier
+			.fillMaxHeight()
+			.padding(
+				start = 24.dp,
+				top = 120.dp,
+				end = view_pad_dp,
+				bottom = 60.dp,
+			),
 		verticalArrangement = Arrangement.Bottom,
 	) {
 		Spacer(Modifier.weight(1f))
@@ -787,34 +926,7 @@ private fun ArcticInfoPanel(
 				overflow = TextOverflow.Ellipsis,
 			)
 
-			Row(
-				horizontalArrangement = Arrangement.spacedBy(10.dp),
-				verticalAlignment = Alignment.CenterVertically,
-			) {
-				Box(
-					Modifier
-						.background(
-							JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.18f),
-							RoundedCornerShape(4.dp),
-						)
-						.padding(horizontal = 8.dp, vertical = 3.dp),
-				) {
-					Text(
-						"INFO",
-						color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.90f),
-						style = JellyfinTheme.typography.default.copy(
-							fontSize = 12.sp,
-							fontWeight = FontWeight.Bold,
-						),
-					)
-				}
-				Text(
-					buildHeroMeta(item),
-					color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
-					style = JellyfinTheme.typography.default.copy(fontSize = 15.sp),
-					maxLines = 1,
-				)
-			}
+			HeroMetaRow(item = item)
 
 			item?.overview?.let { overview ->
 				Text(
@@ -828,16 +940,10 @@ private fun ArcticInfoPanel(
 			}
 		}
 
-		// Fixed bottom row: play/info labeled pills + dots + mode label.
-		// Pills are always-visible (not focus-dependent for visibility) so users
-		// can see what controls are available regardless of focus state.
-		// The bringIntoViewRequester triggers a scroll so the row (and the hero above it)
-		// becomes fully visible whenever any of its children receives focus.
-		Row(
-			horizontalArrangement = Arrangement.spacedBy(12.dp),
-			verticalAlignment = Alignment.CenterVertically,
+		HeroControlRow(
 			modifier = Modifier
 				.fillMaxWidth()
+				.padding(top = 24.dp)
 				.bringIntoViewRequester(bringIntoViewRequester)
 				.onFocusChanged { state ->
 					if (state.isFocused) {
@@ -845,18 +951,490 @@ private fun ArcticInfoPanel(
 							bringIntoViewRequester.bringIntoView()
 						}
 					}
-				}
-				.onPreviewKeyEvent {
-					// From anywhere on the hero control row (play / info / dots / mode),
-					// pressing DOWN drops into the first content row below.
-					if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown) {
-						onDown()
-						true
-					} else {
-						false
+				},
+			onDown = onDown,
+			featuredCount = featuredCount,
+			heroIndex = heroIndex,
+			onPlay = onPlay,
+			onInfo = onInfo,
+			onNextFeatured = onNextFeatured,
+			onPreviousFeatured = onPreviousFeatured,
+			initialFocus = initialFocus,
+		)
+	}
+}
+
+@Composable
+private fun HeroInfoPanelCenter(
+	modifier: Modifier = Modifier,
+	item: BaseItemDto?,
+	featuredCount: Int,
+	heroIndex: Int,
+	onPlay: () -> Unit,
+	onInfo: () -> Unit,
+	onNextFeatured: () -> Unit,
+	onPreviousFeatured: () -> Unit,
+	onDown: () -> Unit,
+) {
+	val bringIntoViewRequester = remember { BringIntoViewRequester() }
+	val bringIntoViewScope = rememberCoroutineScope()
+
+	Column(
+		modifier = modifier
+			.fillMaxHeight()
+			.padding(
+				start = view_pad_dp,
+				top = 120.dp,
+				end = view_pad_dp,
+				bottom = 80.dp,
+			),
+		verticalArrangement = Arrangement.Bottom,
+		horizontalAlignment = Alignment.CenterHorizontally,
+	) {
+		Spacer(Modifier.weight(1f))
+		Column(
+			verticalArrangement = Arrangement.spacedBy(10.dp),
+			horizontalAlignment = Alignment.CenterHorizontally,
+		) {
+			Text(
+				item?.name ?: "",
+				color = JellyfinTheme.colorScheme.onBackground,
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 46.sp,
+					fontWeight = FontWeight.Bold,
+				),
+				maxLines = 2,
+				overflow = TextOverflow.Ellipsis,
+			)
+			HeroMetaRow(item = item)
+		}
+
+		HeroControlRow(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(top = 24.dp)
+				.bringIntoViewRequester(bringIntoViewRequester)
+				.onFocusChanged { state ->
+					if (state.isFocused) {
+						bringIntoViewScope.launch {
+							bringIntoViewRequester.bringIntoView()
+						}
 					}
 				},
+			onDown = onDown,
+			featuredCount = featuredCount,
+			heroIndex = heroIndex,
+			onPlay = onPlay,
+			onInfo = onInfo,
+			onNextFeatured = onNextFeatured,
+			onPreviousFeatured = onPreviousFeatured,
+		)
+	}
+}
+
+@Composable
+private fun HeroPosterShowcase(
+	modifier: Modifier = Modifier,
+	item: BaseItemDto?,
+	featuredCount: Int,
+	heroIndex: Int,
+	onPlay: () -> Unit,
+	onInfo: () -> Unit,
+	onNextFeatured: () -> Unit,
+	onPreviousFeatured: () -> Unit,
+	initialFocus: FocusRequester,
+	onDown: () -> Unit,
+) {
+	val api = koinInject<ApiClient>()
+	val poster = item?.itemImages?.values?.firstOrNull()
+	val bringIntoViewRequester = remember { BringIntoViewRequester() }
+	val bringIntoViewScope = rememberCoroutineScope()
+
+	Row(
+		modifier = modifier
+			.padding(
+				start = 24.dp,
+				top = 120.dp,
+				end = view_pad_dp,
+				bottom = 60.dp,
+			),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(28.dp),
+	) {
+		Box(
+			modifier = Modifier
+				.width(420.dp)
+				.height(620.dp)
+				.clip(RoundedCornerShape(12.dp))
+				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f)),
 		) {
+			if (poster != null) {
+				AsyncImage(
+					url = poster.getUrl(api, maxWidth = 700),
+					blurHash = poster.blurHash,
+					scaleType = ImageView.ScaleType.FIT_CENTER,
+					modifier = Modifier.fillMaxSize(),
+				)
+			}
+		}
+
+		Column(
+			modifier = Modifier.weight(1f),
+			verticalArrangement = Arrangement.spacedBy(10.dp),
+		) {
+			Spacer(Modifier.weight(1f))
+			Text(
+				item?.name ?: "",
+				color = JellyfinTheme.colorScheme.onBackground,
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 46.sp,
+					fontWeight = FontWeight.Bold,
+				),
+				maxLines = 2,
+				overflow = TextOverflow.Ellipsis,
+			)
+			HeroMetaRow(item = item)
+			item?.overview?.let { overview ->
+				Text(
+					overview,
+					color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.82f),
+					style = JellyfinTheme.typography.default.copy(fontSize = 15.sp, lineHeight = 22.sp),
+					maxLines = 5,
+					overflow = TextOverflow.Ellipsis,
+				)
+			}
+
+			HeroControlRow(
+				modifier = Modifier
+					.fillMaxWidth()
+					.padding(top = 24.dp)
+					.bringIntoViewRequester(bringIntoViewRequester)
+					.onFocusChanged { state ->
+						if (state.isFocused) {
+							bringIntoViewScope.launch {
+								bringIntoViewRequester.bringIntoView()
+							}
+						}
+					},
+				onDown = onDown,
+				featuredCount = featuredCount,
+				heroIndex = heroIndex,
+				onPlay = onPlay,
+				onInfo = onInfo,
+				onNextFeatured = onNextFeatured,
+				onPreviousFeatured = onPreviousFeatured,
+				initialFocus = initialFocus,
+			)
+		}
+	}
+}
+
+@Composable
+private fun HeroLandscapeShowcase(
+	modifier: Modifier = Modifier,
+	item: BaseItemDto?,
+	featuredCount: Int,
+	heroIndex: Int,
+	onPlay: () -> Unit,
+	onInfo: () -> Unit,
+	onNextFeatured: () -> Unit,
+	onPreviousFeatured: () -> Unit,
+	initialFocus: FocusRequester,
+	onDown: () -> Unit,
+) {
+	val api = koinInject<ApiClient>()
+	val image = item?.itemBackdropImages?.firstOrNull() ?: item?.itemImages?.values?.firstOrNull()
+	val bringIntoViewRequester = remember { BringIntoViewRequester() }
+	val bringIntoViewScope = rememberCoroutineScope()
+
+	Column(
+		modifier = modifier
+			.fillMaxHeight()
+			.padding(
+				start = 24.dp,
+				top = 120.dp,
+				end = view_pad_dp,
+				bottom = 60.dp,
+			),
+		verticalArrangement = Arrangement.Bottom,
+	) {
+		Spacer(Modifier.weight(1f))
+
+		Box(
+			modifier = Modifier
+				.fillMaxWidth()
+				.height(320.dp)
+				.clip(RoundedCornerShape(12.dp))
+				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f)),
+		) {
+			if (image != null) {
+				AsyncImage(
+					url = image.getUrl(api, maxWidth = 1200),
+					blurHash = image.blurHash,
+					scaleType = ImageView.ScaleType.CENTER_CROP,
+					modifier = Modifier.fillMaxSize(),
+				)
+			}
+		}
+
+		Column(
+			modifier = Modifier.padding(top = 20.dp),
+			verticalArrangement = Arrangement.spacedBy(8.dp),
+		) {
+			Text(
+				item?.name ?: "",
+				color = JellyfinTheme.colorScheme.onBackground,
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 38.sp,
+					fontWeight = FontWeight.Bold,
+				),
+				maxLines = 1,
+				overflow = TextOverflow.Ellipsis,
+			)
+			HeroMetaRow(item = item)
+		}
+
+		HeroControlRow(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(top = 20.dp)
+				.bringIntoViewRequester(bringIntoViewRequester)
+				.onFocusChanged { state ->
+					if (state.isFocused) {
+						bringIntoViewScope.launch {
+							bringIntoViewRequester.bringIntoView()
+						}
+					}
+				},
+			onDown = onDown,
+			featuredCount = featuredCount,
+			heroIndex = heroIndex,
+			onPlay = onPlay,
+			onInfo = onInfo,
+			onNextFeatured = onNextFeatured,
+			onPreviousFeatured = onPreviousFeatured,
+			initialFocus = initialFocus,
+		)
+	}
+}
+
+@Composable
+private fun HeroMinimalTitle(
+	modifier: Modifier = Modifier,
+	item: BaseItemDto?,
+	onPlay: () -> Unit,
+	onInfo: () -> Unit,
+	onNextFeatured: () -> Unit,
+	onPreviousFeatured: () -> Unit,
+	initialFocus: FocusRequester,
+	onDown: () -> Unit,
+) {
+	val bringIntoViewRequester = remember { BringIntoViewRequester() }
+	val bringIntoViewScope = rememberCoroutineScope()
+
+	Column(
+		modifier = modifier
+			.fillMaxHeight()
+			.padding(bottom = 80.dp),
+		verticalArrangement = Arrangement.Bottom,
+		horizontalAlignment = Alignment.CenterHorizontally,
+	) {
+		Spacer(Modifier.weight(1f))
+		Text(
+			item?.name ?: "",
+			color = JellyfinTheme.colorScheme.onBackground,
+			style = JellyfinTheme.typography.default.copy(
+				fontSize = 56.sp,
+				fontWeight = FontWeight.Bold,
+			),
+			maxLines = 1,
+			overflow = TextOverflow.Ellipsis,
+		)
+
+		HeroControlRow(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(top = 24.dp)
+				.bringIntoViewRequester(bringIntoViewRequester)
+				.onFocusChanged { state ->
+					if (state.isFocused) {
+						bringIntoViewScope.launch {
+							bringIntoViewRequester.bringIntoView()
+						}
+					}
+				},
+			onDown = onDown,
+			featuredCount = 0,
+			heroIndex = 0,
+			onPlay = onPlay,
+			onInfo = onInfo,
+			onNextFeatured = onNextFeatured,
+			onPreviousFeatured = onPreviousFeatured,
+			initialFocus = initialFocus,
+		)
+	}
+}
+
+@Composable
+private fun HeroWithNavPills(
+	modifier: Modifier = Modifier,
+	item: BaseItemDto?,
+	onPlay: () -> Unit,
+	onInfo: () -> Unit,
+	onNextFeatured: () -> Unit,
+	onPreviousFeatured: () -> Unit,
+	initialFocus: FocusRequester,
+	onDown: () -> Unit,
+) {
+	val bringIntoViewRequester = remember { BringIntoViewRequester() }
+	val bringIntoViewScope = rememberCoroutineScope()
+
+	Column(
+		modifier = modifier
+			.fillMaxHeight()
+			.padding(
+				start = 24.dp,
+				top = 120.dp,
+				end = view_pad_dp,
+				bottom = 60.dp,
+			),
+		verticalArrangement = Arrangement.Bottom,
+	) {
+		Spacer(Modifier.weight(1f))
+		Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+			Text(
+				item?.name ?: "",
+				color = JellyfinTheme.colorScheme.onBackground,
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 46.sp,
+					fontWeight = FontWeight.Bold,
+				),
+				maxLines = 2,
+				overflow = TextOverflow.Ellipsis,
+			)
+			HeroMetaRow(item = item)
+		}
+
+		HeroControlRow(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(top = 20.dp)
+				.bringIntoViewRequester(bringIntoViewRequester)
+				.onFocusChanged { state ->
+					if (state.isFocused) {
+						bringIntoViewScope.launch {
+							bringIntoViewRequester.bringIntoView()
+						}
+					}
+				},
+			onDown = onDown,
+			featuredCount = 0,
+			heroIndex = 0,
+			onPlay = onPlay,
+			onInfo = onInfo,
+			onNextFeatured = onNextFeatured,
+			onPreviousFeatured = onPreviousFeatured,
+			initialFocus = initialFocus,
+		)
+
+		// Bottom navigation pills matching the screenshot style.
+		Row(
+			modifier = Modifier
+				.fillMaxWidth()
+				.padding(top = 16.dp),
+			horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+			verticalAlignment = Alignment.CenterVertically,
+		) {
+			val pills = listOf("本周热门", "本周热门", "在影院")
+			pills.forEachIndexed { index, label ->
+				var focused by remember { mutableStateOf(false) }
+				Row(
+					modifier = Modifier
+						.height(40.dp)
+						.background(
+							if (focused) JellyfinTheme.colorScheme.buttonFocused
+							else JellyfinTheme.colorScheme.surface.copy(alpha = 0.45f),
+							RoundedCornerShape(20.dp),
+						)
+						.onFocusChanged { focused = it.hasFocus }
+						.clickable { }
+						.padding(horizontal = 16.dp),
+					verticalAlignment = Alignment.CenterVertically,
+				) {
+					Text(
+						label,
+						color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
+							else JellyfinTheme.colorScheme.onBackground,
+						style = JellyfinTheme.typography.default.copy(
+							fontSize = 13.sp,
+							fontWeight = FontWeight.SemiBold,
+						),
+						maxLines = 1,
+					)
+				}
+			}
+		}
+	}
+}
+
+@Composable
+private fun HeroMetaRow(item: BaseItemDto?) {
+	Row(
+		horizontalArrangement = Arrangement.spacedBy(10.dp),
+		verticalAlignment = Alignment.CenterVertically,
+	) {
+		Box(
+			Modifier
+				.background(
+					JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.18f),
+					RoundedCornerShape(4.dp),
+				)
+				.padding(horizontal = 8.dp, vertical = 3.dp),
+		) {
+			Text(
+				"INFO",
+				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.90f),
+				style = JellyfinTheme.typography.default.copy(
+					fontSize = 12.sp,
+					fontWeight = FontWeight.Bold,
+				),
+			)
+		}
+		Text(
+			buildHeroMeta(item),
+			color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+			style = JellyfinTheme.typography.default.copy(fontSize = 15.sp),
+			maxLines = 1,
+		)
+	}
+}
+
+@Composable
+private fun HeroControlRow(
+	modifier: Modifier = Modifier,
+	onDown: () -> Unit,
+	featuredCount: Int,
+	heroIndex: Int,
+	onPlay: () -> Unit,
+	onInfo: () -> Unit,
+	onNextFeatured: () -> Unit,
+	onPreviousFeatured: () -> Unit,
+	initialFocus: FocusRequester? = null,
+) {
+	Row(
+		horizontalArrangement = Arrangement.spacedBy(12.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		modifier = modifier
+			.fillMaxWidth()
+			.onPreviewKeyEvent {
+				if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown) {
+					onDown()
+					true
+				} else {
+					false
+				}
+			},
+	) {
 		HeroPillButton(
 			label = "播放",
 			iconRes = R.drawable.ic_play,
@@ -867,39 +1445,32 @@ private fun ArcticInfoPanel(
 			focusRequester = initialFocus,
 		)
 
-			HeroPillButton(
-				label = "更多信息",
-				iconRes = R.drawable.ic_info,
-				isPrimary = false,
-				onClick = onInfo,
-				onRight = onNextFeatured,
-			)
+		HeroPillButton(
+			label = "更多信息",
+			iconRes = R.drawable.ic_info,
+			isPrimary = false,
+			onClick = onInfo,
+			onRight = onNextFeatured,
+			onDown = onDown,
+		)
 
-			if (featuredCount > 1) {
-				Row(
-					horizontalArrangement = Arrangement.spacedBy(6.dp),
-					modifier = Modifier.padding(start = 16.dp),
-					verticalAlignment = Alignment.CenterVertically,
-				) {
-					repeat(featuredCount) { i ->
-						Box(
-							Modifier
-								.size(width = if (i == heroIndex) 22.dp else 6.dp, height = 6.dp)
-								.background(
-									if (i == heroIndex) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.45f),
-									RoundedCornerShape(3.dp),
-								),
-						)
-					}
+		if (featuredCount > 1) {
+			Row(
+				horizontalArrangement = Arrangement.spacedBy(6.dp),
+				modifier = Modifier.padding(start = 16.dp),
+				verticalAlignment = Alignment.CenterVertically,
+			) {
+				repeat(featuredCount) { i ->
+					Box(
+						Modifier
+							.size(width = if (i == heroIndex) 22.dp else 6.dp, height = 6.dp)
+							.background(
+								if (i == heroIndex) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.45f),
+								RoundedCornerShape(3.dp),
+							),
+					)
 				}
 			}
-
-			Spacer(Modifier.width(8.dp))
-
-			HeroModePill(
-				label = layoutMode.label,
-				onClick = onCycleLayoutMode,
-			)
 		}
 	}
 }
@@ -990,56 +1561,6 @@ private fun HeroPillButton(
 	}
 }
 
-@Composable
-private fun HeroModePill(
-	label: String,
-	onClick: () -> Unit,
-) {
-	var focused by remember { mutableStateOf(false) }
-	val shape = RoundedCornerShape(10.dp)
-
-	Row(
-		modifier = Modifier
-			.height(44.dp)
-			.background(
-				if (focused) JellyfinTheme.colorScheme.buttonFocused
-				else JellyfinTheme.colorScheme.surface.copy(alpha = 0.50f),
-				shape,
-			)
-			.border(
-				width = if (focused) 2.dp else 1.dp,
-				color = if (focused) Color.Transparent
-					else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.40f),
-				shape = shape,
-			)
-			.onFocusChanged { focused = it.hasFocus }
-			.clickable(onClick = onClick)
-			.padding(horizontal = 14.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		horizontalArrangement = Arrangement.spacedBy(6.dp),
-	) {
-		Text(
-			label,
-			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
-				else JellyfinTheme.colorScheme.onBackground,
-			style = JellyfinTheme.typography.default.copy(
-				fontSize = 13.sp,
-				fontWeight = FontWeight.SemiBold,
-			),
-			maxLines = 1,
-		)
-		Text(
-			"⇄",
-			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
-				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.70f),
-			style = JellyfinTheme.typography.default.copy(
-				fontSize = 14.sp,
-				fontWeight = FontWeight.Bold,
-			),
-		)
-	}
-}
-
 private fun buildHeroMeta(item: BaseItemDto?): String = buildString {
 	item ?: return@buildString
 	item.productionYear?.let { append(it); append(" · ") }
@@ -1056,7 +1577,8 @@ private fun buildHeroMeta(item: BaseItemDto?): String = buildString {
 private fun ArcticRowView(
 	title: String,
 	items: List<BaseItemDto>,
-	layoutMode: HomeLayoutMode,
+	layoutMode: RowLayoutMode,
+	onLayoutModeChange: (RowLayoutMode) -> Unit,
 	onItemClick: (BaseItemDto) -> Unit,
 	index: Int,
 	isFirstRow: Boolean,
@@ -1071,8 +1593,6 @@ private fun ArcticRowView(
 		Modifier
 			.fillMaxWidth()
 			.padding(top = 18.dp, bottom = 6.dp)
-			// Bring the whole row into view when any of its posters gains focus, so a
-			// focused row is never half-clipped at the screen edge (Netflix behaviour).
 			.bringIntoViewRequester(bringRequester)
 			.onFocusChanged { if (it.isFocused) scope.launch { runCatching { bringRequester.bringIntoView() } } },
 	) {
@@ -1095,10 +1615,14 @@ private fun ArcticRowView(
 					fontSize = 19.sp,
 				),
 			)
+			Spacer(Modifier.weight(1f))
+			RowLayoutModeSwitch(
+				current = layoutMode,
+				onChange = onLayoutModeChange,
+			)
 		}
 
 		LazyRow(
-			// Remembers the last focused poster so returning to a row keeps your place.
 			modifier = Modifier.focusRestorer(),
 			contentPadding = PaddingValues(start = 36.dp, end = 36.dp),
 			horizontalArrangement = Arrangement.spacedBy(16.dp),
@@ -1110,12 +1634,9 @@ private fun ArcticRowView(
 						if (ev.type == KeyEventType.KeyDown) {
 							when (ev.key) {
 								Key.DirectionLeft -> {
-									// Only the first poster of a row opens the left rail;
-									// elsewhere LEFT moves to the previous poster.
 									if (listIndex == 0) { runCatching { sidebarFocus.requestFocus() }; true } else false
 								}
 								Key.DirectionUp -> {
-									// From the first poster of the first row, UP returns to the hero.
 									if (isFirstRow && listIndex == 0) { runCatching { heroFocus.requestFocus() }; true } else false
 								}
 								else -> false
@@ -1123,15 +1644,54 @@ private fun ArcticRowView(
 						} else false
 					}
 				when (layoutMode) {
-					HomeLayoutMode.PORTRAIT_POSTERS -> PortraitPosterCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
-					HomeLayoutMode.WIDE_INFO_CARDS -> WideInfoCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
-					HomeLayoutMode.LANDSCAPE_CARDS -> LandscapeCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
-					HomeLayoutMode.CIRCULAR_DISCS -> CircularDiscCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
-					HomeLayoutMode.PORTRAIT_WITH_BAR -> PortraitWithBarCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
-					HomeLayoutMode.LARGE_LANDSCAPE -> LargeLandscapeCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
+					RowLayoutMode.PORTRAIT -> PortraitPosterCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
+					RowLayoutMode.LANDSCAPE -> LandscapeCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
 				}
 			}
 		}
+	}
+}
+
+@Composable
+private fun RowLayoutModeSwitch(
+	current: RowLayoutMode,
+	onChange: (RowLayoutMode) -> Unit,
+) {
+	var focused by remember { mutableStateOf(false) }
+
+	Row(
+		modifier = Modifier
+			.height(32.dp)
+			.background(
+				if (focused) JellyfinTheme.colorScheme.buttonFocused
+				else JellyfinTheme.colorScheme.surface.copy(alpha = 0.40f),
+				RoundedCornerShape(8.dp),
+			)
+			.onFocusChanged { focused = it.hasFocus }
+			.clickable { onChange(current.next) }
+			.padding(horizontal = 10.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		horizontalArrangement = Arrangement.spacedBy(6.dp),
+	) {
+		Text(
+			current.label,
+			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
+				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+			style = JellyfinTheme.typography.default.copy(
+				fontSize = 12.sp,
+				fontWeight = FontWeight.SemiBold,
+			),
+			maxLines = 1,
+		)
+		Text(
+			"⇄",
+			color = if (focused) JellyfinTheme.colorScheme.onButtonFocused
+				else JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+			style = JellyfinTheme.typography.default.copy(
+				fontSize = 12.sp,
+				fontWeight = FontWeight.Bold,
+			),
+		)
 	}
 }
 
@@ -1185,87 +1745,6 @@ private fun PortraitPosterCard(
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.width(200.dp),
 		)
-	}
-}
-
-@Composable
-private fun WideInfoCard(
-	item: BaseItemDto,
-	onClick: () -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	val api = koinInject<ApiClient>()
-	val image = item.itemImages.values.firstOrNull() ?: item.itemBackdropImages.firstOrNull()
-	var focused by remember { mutableStateOf(false) }
-
-	Row(
-		modifier = modifier
-			.width(520.dp)
-			.height(180.dp)
-			.clip(RoundedCornerShape(12.dp))
-			.background(
-				Brush.horizontalGradient(
-					0.0f to JellyfinTheme.colorScheme.buttonFocused.copy(alpha = 0.22f),
-					0.4f to JellyfinTheme.colorScheme.surface.copy(alpha = 0.45f),
-					1.0f to JellyfinTheme.colorScheme.surface.copy(alpha = 0.25f),
-				),
-			)
-			.border(
-				width = if (focused) 3.dp else 0.dp,
-				color = if (focused) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
-				shape = RoundedCornerShape(12.dp),
-			)
-			.onFocusChanged { focused = it.hasFocus }
-			.clickable(onClick = onClick)
-			.padding(12.dp),
-		horizontalArrangement = Arrangement.spacedBy(14.dp),
-		verticalAlignment = Alignment.CenterVertically,
-	) {
-		Box(
-			modifier = Modifier
-				.width(120.dp)
-				.height(180.dp)
-				.clip(RoundedCornerShape(8.dp))
-				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f)),
-		) {
-			if (image != null) {
-				AsyncImage(
-					url = image.getUrl(api, maxWidth = 300),
-					blurHash = image.blurHash,
-					scaleType = ImageView.ScaleType.FIT_CENTER,
-					modifier = Modifier.fillMaxSize(),
-				)
-			}
-		}
-
-		Column(
-			modifier = Modifier.weight(1f),
-			verticalArrangement = Arrangement.spacedBy(6.dp),
-		) {
-			Text(
-				item.name ?: "",
-				color = JellyfinTheme.colorScheme.onBackground,
-				style = JellyfinTheme.typography.default.copy(
-					fontWeight = FontWeight.Bold,
-					fontSize = 17.sp,
-				),
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-			)
-			Text(
-				buildHeroMeta(item),
-				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.70f),
-				style = JellyfinTheme.typography.default.copy(fontSize = 13.sp),
-				maxLines = 1,
-			)
-			Text(
-				item.overview ?: "",
-				color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.75f),
-				style = JellyfinTheme.typography.default.copy(fontSize = 13.sp, lineHeight = 18.sp),
-				maxLines = 4,
-				overflow = TextOverflow.Ellipsis,
-			)
-		}
 	}
 }
 
@@ -1326,195 +1805,6 @@ private fun LandscapeCard(
 			maxLines = 1,
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.width(300.dp),
-		)
-	}
-}
-
-@Composable
-private fun CircularDiscCard(
-	item: BaseItemDto,
-	onClick: () -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	val api = koinInject<ApiClient>()
-	val image = item.itemImages.values.firstOrNull() ?: item.itemBackdropImages.firstOrNull()
-	var focused by remember { mutableStateOf(false) }
-
-	Column(
-		modifier = modifier
-			.width(160.dp)
-			.onFocusChanged { focused = it.hasFocus }
-			.clickable(onClick = onClick),
-		horizontalAlignment = Alignment.CenterHorizontally,
-		verticalArrangement = Arrangement.spacedBy(10.dp),
-	) {
-		Box(
-			modifier = Modifier
-				.size(160.dp)
-				.clip(CircleShape)
-				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f))
-				.border(
-					width = if (focused) 4.dp else 0.dp,
-					color = if (focused) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
-					shape = CircleShape,
-				),
-		) {
-			if (image != null) {
-				AsyncImage(
-					url = image.getUrl(api, maxWidth = 320),
-					blurHash = image.blurHash,
-					scaleType = ImageView.ScaleType.CENTER_CROP,
-					modifier = Modifier.fillMaxSize(),
-				)
-			}
-			Box(
-				Modifier
-					.size(26.dp)
-					.align(Alignment.Center)
-					.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.65f), CircleShape)
-					.border(2.dp, JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.25f), CircleShape),
-			)
-		}
-
-		Text(
-			item.name ?: "",
-			color = JellyfinTheme.colorScheme.onBackground,
-			style = JellyfinTheme.typography.default.copy(
-				fontWeight = FontWeight.Medium,
-				fontSize = 13.sp,
-			),
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.width(160.dp),
-		)
-		Text(
-			buildHeroMeta(item),
-			color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.60f),
-			style = JellyfinTheme.typography.default.copy(fontSize = 11.sp),
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.width(160.dp),
-		)
-	}
-}
-
-@Composable
-private fun PortraitWithBarCard(
-	item: BaseItemDto,
-	onClick: () -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	val api = koinInject<ApiClient>()
-	val image = item.itemImages.values.firstOrNull() ?: item.itemBackdropImages.firstOrNull()
-	var focused by remember { mutableStateOf(false) }
-
-	Column(
-		modifier = modifier
-			.width(200.dp)
-			.onFocusChanged { focused = it.hasFocus }
-			.clickable(onClick = onClick),
-		verticalArrangement = Arrangement.spacedBy(8.dp),
-	) {
-		Box(
-			modifier = Modifier
-				.width(200.dp)
-				.height(294.dp)
-				.clip(RoundedCornerShape(8.dp))
-				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f))
-				.border(
-					width = if (focused) 3.dp else 0.dp,
-					color = if (focused) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
-					shape = RoundedCornerShape(8.dp),
-				),
-		) {
-			if (image != null) {
-				AsyncImage(
-					url = image.getUrl(api, maxWidth = 400),
-					blurHash = image.blurHash,
-					scaleType = ImageView.ScaleType.FIT_CENTER,
-					modifier = Modifier.fillMaxSize(),
-				)
-			}
-		}
-
-		Row(
-			modifier = Modifier
-				.width(200.dp)
-				.clip(RoundedCornerShape(6.dp))
-				.background(JellyfinTheme.colorScheme.surface.copy(alpha = 0.40f))
-				.padding(horizontal = 10.dp, vertical = 6.dp),
-			verticalAlignment = Alignment.CenterVertically,
-			horizontalArrangement = Arrangement.SpaceBetween,
-		) {
-			Text(
-				item.name ?: "",
-				color = JellyfinTheme.colorScheme.onBackground,
-				style = JellyfinTheme.typography.default.copy(
-					fontWeight = FontWeight.Medium,
-					fontSize = 13.sp,
-				),
-				maxLines = 1,
-				overflow = TextOverflow.Ellipsis,
-				modifier = Modifier.weight(1f),
-			)
-			Text(
-				"${item.userData?.unplayedItemCount ?: 0} 集",
-				color = JellyfinTheme.colorScheme.buttonFocused,
-				style = JellyfinTheme.typography.default.copy(fontSize = 11.sp),
-			)
-		}
-	}
-}
-
-@Composable
-private fun LargeLandscapeCard(
-	item: BaseItemDto,
-	onClick: () -> Unit,
-	modifier: Modifier = Modifier,
-) {
-	val api = koinInject<ApiClient>()
-	val image = item.itemBackdropImages.firstOrNull() ?: item.itemImages.values.firstOrNull()
-	var focused by remember { mutableStateOf(false) }
-
-	Column(
-		modifier = modifier
-			.width(420.dp)
-			.onFocusChanged { focused = it.hasFocus }
-			.clickable(onClick = onClick),
-		verticalArrangement = Arrangement.spacedBy(8.dp),
-	) {
-		Box(
-			modifier = Modifier
-				.width(420.dp)
-				.height(236.dp)
-				.clip(RoundedCornerShape(10.dp))
-				.background(JellyfinTheme.colorScheme.background.copy(alpha = 0.35f))
-				.border(
-					width = if (focused) 3.dp else 0.dp,
-					color = if (focused) JellyfinTheme.colorScheme.buttonFocused else Color.Transparent,
-					shape = RoundedCornerShape(10.dp),
-				),
-		) {
-			if (image != null) {
-				AsyncImage(
-					url = image.getUrl(api, maxWidth = 700),
-					blurHash = image.blurHash,
-					scaleType = ImageView.ScaleType.CENTER_CROP,
-					modifier = Modifier.fillMaxSize(),
-				)
-			}
-		}
-
-		Text(
-			item.name ?: "",
-			color = JellyfinTheme.colorScheme.onBackground,
-			style = JellyfinTheme.typography.default.copy(
-				fontWeight = FontWeight.Medium,
-				fontSize = 15.sp,
-			),
-			maxLines = 1,
-			overflow = TextOverflow.Ellipsis,
-			modifier = Modifier.width(420.dp),
 		)
 	}
 }
