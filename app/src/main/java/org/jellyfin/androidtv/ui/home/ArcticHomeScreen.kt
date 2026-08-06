@@ -27,10 +27,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -45,6 +47,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -272,67 +275,66 @@ fun ArcticHomeScreen() {
 
 	BoxWithConstraints(Modifier.fillMaxSize().background(JellyfinTheme.colorScheme.background)) {
 		val screenHeight = maxHeight
-		// Pinned hero occupies the top band; the poster still reaches the left screen
-		// edge because the backdrop is drawn full-width behind the sidebar.
-		val heroHeight = screenHeight * 0.62f
+		// Netflix-style: the hero is the FIRST screen of one vertical scroll. It is NOT
+		// pinned — when you browse down, the whole page scrolls up and the hero glides
+		// off the top, then the first row occupies the screen fully. No half-poster
+		// peeking from under a fixed banner.
+		val heroHeight = screenHeight * 0.88f
 
-		// Full-bleed hero backdrop in the top screen area, drawn behind the sidebar
-		// and the main content so the poster extends all the way to the left edge.
-		HeroBackground(
-			item = heroItem,
-			modifier = Modifier
-				.fillMaxWidth()
-				.height(heroHeight)
-				.align(Alignment.TopStart),
-		)
+		val scrollState = rememberScrollState()
+		val firstRowFocus = remember { FocusRequester() }
+		val homeScope = rememberCoroutineScope()
 
-		Row(Modifier.fillMaxSize()) {
-			ArcticSidebar(
-				expanded = sidebarExpanded,
-				onExpandedChange = { sidebarExpanded = it },
-				initialFocus = sidebarFocus,
-				mainContentFocus = mainContentFocus,
-				config = menuConfig,
-				onHome = {
-					selectedCategory = null
-				},
-				onSearch = {
-					sidebarExpanded = false
-					navigationRepository.navigate(Destinations.search())
-				},
-				onSettings = {
-					sidebarExpanded = false
-					navigationRepository.navigate(Destinations.fuseSettings)
-				},
-				onCategory = { cat ->
-					selectedCategory = cat
-					Toast.makeText(context, "正在加载 ${cat.label}", Toast.LENGTH_SHORT).show()
-				},
-			)
-
-			ArcticMainContent(
-				modifier = Modifier.weight(1f).fillMaxHeight(),
-				selectedCategory = selectedCategory,
-				heroItem = heroItem,
-				heroCount = activeHeroCount,
-				heroIndex = if (selectedCategory == null) homeHeroIndex else categoryHeroIndex,
-				onHeroIndexChange = { idx ->
-					if (selectedCategory == null) homeHeroIndex = idx else categoryHeroIndex = idx
-				},
-				homeRows = homeRows,
-				categoryRows = categoryRows,
-				categoryLoading = categoryLoading,
-				loaded = loaded,
+		// One scroll container holds hero + rows. The left sidebar stays as a fixed
+		// overlay on top so it is always reachable.
+		ArcticMainContent(
+			modifier = Modifier.fillMaxSize(),
+			scrollState = scrollState,
+			firstRowFocus = firstRowFocus,
+			selectedCategory = selectedCategory,
+			heroItem = heroItem,
+			heroCount = activeHeroCount,
+			heroIndex = if (selectedCategory == null) homeHeroIndex else categoryHeroIndex,
+			onHeroIndexChange = { idx ->
+				if (selectedCategory == null) homeHeroIndex = idx else categoryHeroIndex = idx
+			},
+			homeRows = homeRows,
+			categoryRows = categoryRows,
+			categoryLoading = categoryLoading,
+			loaded = loaded,
 			layoutMode = layoutMode,
 			heroHeight = heroHeight,
-				onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
-				onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
-				onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
-				onCycleLayoutMode = { layoutMode = HomeLayoutMode.entries[(layoutMode.ordinal + 1) % HomeLayoutMode.entries.size] },
-				initialFocus = mainContentFocus,
-				sidebarFocus = sidebarFocus,
-			)
-		}
+			onItemClick = { navigationRepository.navigate(Destinations.itemDetails(it.id)) },
+			onHeroPlay = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
+			onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
+			onCycleLayoutMode = { layoutMode = HomeLayoutMode.entries[(layoutMode.ordinal + 1) % HomeLayoutMode.entries.size] },
+			initialFocus = mainContentFocus,
+			sidebarFocus = sidebarFocus,
+		)
+
+		ArcticSidebar(
+			expanded = sidebarExpanded,
+			onExpandedChange = { sidebarExpanded = it },
+			initialFocus = sidebarFocus,
+			mainContentFocus = mainContentFocus,
+			config = menuConfig,
+			onHome = {
+				selectedCategory = null
+				homeScope.launch { runCatching { scrollState.scrollTo(0) } }
+			},
+			onSearch = {
+				sidebarExpanded = false
+				navigationRepository.navigate(Destinations.search())
+			},
+			onSettings = {
+				sidebarExpanded = false
+				navigationRepository.navigate(Destinations.fuseSettings)
+			},
+			onCategory = { cat ->
+				selectedCategory = cat
+				Toast.makeText(context, "正在加载 ${cat.label}", Toast.LENGTH_SHORT).show()
+			},
+		)
 	}
 
 	LaunchedEffect(Unit) { runCatching { mainContentFocus.requestFocus() } }
@@ -498,6 +500,8 @@ private fun SidebarItem(
 @Composable
 private fun ArcticMainContent(
 	modifier: Modifier = Modifier,
+	scrollState: ScrollState,
+	firstRowFocus: FocusRequester,
 	selectedCategory: CategoryMenuConfig?,
 	heroItem: BaseItemDto?,
 	heroCount: Int,
@@ -516,112 +520,93 @@ private fun ArcticMainContent(
 	initialFocus: FocusRequester,
 	sidebarFocus: FocusRequester,
 ) {
-	val rowsScrollState = rememberScrollState()
-
-	// Whenever the active category changes, snap the rows scroll back to the top.
+	// Snap back to the top whenever the active category changes.
 	LaunchedEffect(selectedCategory) {
-		rowsScrollState.scrollTo(0)
+		runCatching { scrollState.scrollTo(0) }
 	}
 
+	// One vertical scroll holds the hero (first screen) and all rows below it, so the
+	// whole page glides as a unit — exactly like Netflix's TV home.
 	Column(
 		Modifier
 			.fillMaxSize()
-			.then(modifier),
+			.then(modifier)
+			.verticalScroll(scrollState),
 	) {
 		val isHome = selectedCategory == null
-		// Pinned hero: it stays put (and keeps rotating) while the rows below scroll
-		// independently, so the big stage never overlaps the posters.
 		val showRows = when {
 			!isHome -> true
 			else -> !layoutMode.isFullScreenHero
 		}
 
-			HeroStage(
-				modifier = Modifier
-					.fillMaxWidth()
-					.height(heroHeight),
-				item = heroItem,
-				featuredCount = heroCount,
-				heroIndex = heroIndex,
-				layoutMode = layoutMode,
-				onPlay = { heroItem?.let(onHeroPlay) },
-				onInfo = { heroItem?.let(onHeroInfo) },
-				onNextFeatured = {
-					if (heroCount > 0) onHeroIndexChange((heroIndex + 1) % heroCount)
-				},
-				onPreviousFeatured = {
-					if (heroCount > 0) onHeroIndexChange((heroIndex - 1 + heroCount) % heroCount)
-				},
-				onCycleLayoutMode = onCycleLayoutMode,
-				initialFocus = initialFocus,
-			)
-
-		// Rows live in their own scroll area pinned below the hero. The opaque
-		// background and the separate scroll guarantee the rotating hero backdrop
-		// is never visible behind or overlapping the posters.
-		Column(
-			Modifier
+		HeroStage(
+			modifier = Modifier
 				.fillMaxWidth()
-				.fillMaxHeight()
-				.background(JellyfinTheme.colorScheme.background)
-				.verticalScroll(rowsScrollState)
-				.onPreviewKeyEvent {
-					if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionLeft) {
-						runCatching { sidebarFocus.requestFocus() }
-						true
-					} else {
-						false
-					}
-				},
-		) {
-			// Soft fade so the first row emerges from the hero instead of a hard edge.
-			Box(
-				Modifier
-					.fillMaxWidth()
-					.height(40.dp)
-					.background(
-						Brush.verticalGradient(
-							0.00f to JellyfinTheme.colorScheme.background,
-							1.00f to Color.Transparent,
-						),
-					),
-			)
+				.height(heroHeight),
+			item = heroItem,
+			featuredCount = heroCount,
+			heroIndex = heroIndex,
+			layoutMode = layoutMode,
+			onPlay = { heroItem?.let(onHeroPlay) },
+			onInfo = { heroItem?.let(onHeroInfo) },
+			onNextFeatured = {
+				if (heroCount > 0) onHeroIndexChange((heroIndex + 1) % heroCount)
+			},
+			onPreviousFeatured = {
+				if (heroCount > 0) onHeroIndexChange((heroIndex - 1 + heroCount) % heroCount)
+			},
+			onCycleLayoutMode = onCycleLayoutMode,
+			initialFocus = initialFocus,
+			scrollState = scrollState,
+			onDown = { runCatching { firstRowFocus.requestFocus() } },
+		)
 
-			if (showRows) {
-				if (!loaded || (selectedCategory != null && categoryLoading)) {
-					Box(
-						Modifier
-							.fillMaxWidth()
-							.padding(top = 12.dp),
-						contentAlignment = Alignment.Center,
-					) {
-						CircularProgressIndicator(
-							modifier = Modifier.size(40.dp),
-							color = JellyfinTheme.colorScheme.buttonFocused,
-						)
-					}
-				} else if (selectedCategory != null && categoryRows.isEmpty()) {
-					Box(
-						Modifier
-							.fillMaxWidth()
-							.padding(top = 12.dp),
-						contentAlignment = Alignment.Center,
-					) {
-						Text(
-							"暂无内容",
-							color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
-							style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
-						)
-					}
-				} else {
-					val rows = if (selectedCategory != null) categoryRows else homeRows
-					rows.forEach { ArcticRowView(it.title, it.items, layoutMode, onItemClick) }
+		if (showRows) {
+			if (!loaded || (selectedCategory != null && categoryLoading)) {
+				Box(
+					Modifier
+						.fillMaxWidth()
+						.padding(top = 24.dp),
+					contentAlignment = Alignment.Center,
+				) {
+					CircularProgressIndicator(
+						modifier = Modifier.size(40.dp),
+						color = JellyfinTheme.colorScheme.buttonFocused,
+					)
+				}
+			} else if (selectedCategory != null && categoryRows.isEmpty()) {
+				Box(
+					Modifier
+						.fillMaxWidth()
+						.padding(top = 24.dp),
+					contentAlignment = Alignment.Center,
+				) {
+					Text(
+						"暂无内容",
+						color = JellyfinTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+						style = JellyfinTheme.typography.default.copy(fontSize = 18.sp),
+					)
+				}
+			} else {
+				val rows = if (selectedCategory != null) categoryRows else homeRows
+				rows.forEachIndexed { index, row ->
+					ArcticRowView(
+						title = row.title,
+						items = row.items,
+						layoutMode = layoutMode,
+						onItemClick = onItemClick,
+						index = index,
+						isFirstRow = index == 0,
+						heroFocus = initialFocus,
+						sidebarFocus = sidebarFocus,
+						firstRowFocus = if (index == 0) firstRowFocus else null,
+					)
 				}
 			}
-			Spacer(Modifier.height(48.dp))
 		}
-		}
+		Spacer(Modifier.height(48.dp))
 	}
+}
 
 // endregion
 
@@ -640,10 +625,25 @@ private fun HeroStage(
 	onPreviousFeatured: () -> Unit,
 	onCycleLayoutMode: () -> Unit,
 	initialFocus: FocusRequester,
+	scrollState: ScrollState,
+	onDown: () -> Unit,
 ) {
-	// The backdrop is now drawn full-bleed by ArcticHomeScreen behind the sidebar.
-	// This container only holds the info panel so text/buttons scroll with the rows.
-	Box(modifier = modifier) {
+	val scope = rememberCoroutineScope()
+	// When focus returns to the hero (e.g. UP from the first row), glide the whole
+	// page back to the top so the big stage is fully visible again.
+	Box(
+		modifier
+			.onFocusChanged {
+				if (it.isFocused) scope.launch { runCatching { scrollState.animateScrollTo(0) } }
+			},
+	) {
+		// Backdrop now lives INSIDE the scroll, so it scrolls away with the page
+		// instead of staying pinned behind the rows.
+		HeroBackground(
+			item = item,
+			modifier = Modifier.fillMaxSize(),
+		)
+
 		ArcticInfoPanel(
 			modifier = Modifier
 				.fillMaxWidth()
@@ -664,6 +664,7 @@ private fun HeroStage(
 			onCycleLayoutMode = onCycleLayoutMode,
 			layoutMode = layoutMode,
 			initialFocus = initialFocus,
+			onDown = onDown,
 		)
 	}
 }
@@ -733,6 +734,7 @@ private fun ArcticInfoPanel(
 	onCycleLayoutMode: () -> Unit,
 	layoutMode: HomeLayoutMode,
 	initialFocus: FocusRequester,
+	onDown: () -> Unit,
 	modifier: Modifier = Modifier,
 ) {
 	// rememberBringIntoViewRequester: when focus enters the button row below, the
@@ -817,14 +819,15 @@ private fun ArcticInfoPanel(
 					}
 				},
 		) {
-			HeroPillButton(
-				label = "播放",
-				iconRes = R.drawable.ic_play,
-				isPrimary = true,
-				onClick = onPlay,
-				onLeft = onPreviousFeatured,
-				focusRequester = initialFocus,
-			)
+		HeroPillButton(
+			label = "播放",
+			iconRes = R.drawable.ic_play,
+			isPrimary = true,
+			onClick = onPlay,
+			onLeft = onPreviousFeatured,
+			onDown = onDown,
+			focusRequester = initialFocus,
+		)
 
 			HeroPillButton(
 				label = "更多信息",
@@ -871,6 +874,7 @@ private fun HeroPillButton(
 	onClick: () -> Unit,
 	onLeft: (() -> Unit)? = null,
 	onRight: (() -> Unit)? = null,
+	onDown: (() -> Unit)? = null,
 	focusRequester: FocusRequester? = null,
 ) {
 	var focused by remember { mutableStateOf(false) }
@@ -912,6 +916,10 @@ private fun HeroPillButton(
 						}
 						Key.DirectionRight -> {
 							onRight?.invoke()
+							true
+						}
+						Key.DirectionDown -> {
+							onDown?.invoke()
 							true
 						}
 						else -> false
@@ -1012,11 +1020,23 @@ private fun ArcticRowView(
 	items: List<BaseItemDto>,
 	layoutMode: HomeLayoutMode,
 	onItemClick: (BaseItemDto) -> Unit,
+	index: Int,
+	isFirstRow: Boolean,
+	heroFocus: FocusRequester,
+	sidebarFocus: FocusRequester,
+	firstRowFocus: FocusRequester?,
 ) {
+	val scope = rememberCoroutineScope()
+	val bringRequester = remember { BringIntoViewRequester() }
+
 	Column(
 		Modifier
 			.fillMaxWidth()
-			.padding(top = 18.dp, bottom = 6.dp),
+			.padding(top = 18.dp, bottom = 6.dp)
+			// Bring the whole row into view when any of its posters gains focus, so a
+			// focused row is never half-clipped at the screen edge (Netflix behaviour).
+			.bringIntoViewRequester(bringRequester)
+			.onFocusChanged { if (it.isFocused) scope.launch { runCatching { bringRequester.bringIntoView() } } },
 	) {
 		Row(
 			verticalAlignment = Alignment.CenterVertically,
@@ -1040,17 +1060,37 @@ private fun ArcticRowView(
 		}
 
 		LazyRow(
+			// Remembers the last focused poster so returning to a row keeps your place.
+			modifier = Modifier.focusRestorer(),
 			contentPadding = PaddingValues(start = 36.dp, end = 36.dp),
 			horizontalArrangement = Arrangement.spacedBy(16.dp),
 		) {
-			items(items, key = { it.id }) { item ->
+			itemsIndexed(items, key = { _, it -> it.id }) { listIndex, item ->
+				val extraModifier = Modifier
+					.then(if (isFirstRow && listIndex == 0 && firstRowFocus != null) Modifier.focusRequester(firstRowFocus) else Modifier)
+					.onPreviewKeyEvent { ev ->
+						if (ev.type == KeyEventType.KeyDown) {
+							when (ev.key) {
+								Key.DirectionLeft -> {
+									// Only the first poster of a row opens the left rail;
+									// elsewhere LEFT moves to the previous poster.
+									if (listIndex == 0) { runCatching { sidebarFocus.requestFocus() }; true } else false
+								}
+								Key.DirectionUp -> {
+									// From the first poster of the first row, UP returns to the hero.
+									if (isFirstRow && listIndex == 0) { runCatching { heroFocus.requestFocus() }; true } else false
+								}
+								else -> false
+							}
+						} else false
+					}
 				when (layoutMode) {
-					HomeLayoutMode.PORTRAIT_POSTERS -> PortraitPosterCard(item = item, onClick = { onItemClick(item) })
-					HomeLayoutMode.WIDE_INFO_CARDS -> WideInfoCard(item = item, onClick = { onItemClick(item) })
-					HomeLayoutMode.LANDSCAPE_CARDS -> LandscapeCard(item = item, onClick = { onItemClick(item) })
-					HomeLayoutMode.CIRCULAR_DISCS -> CircularDiscCard(item = item, onClick = { onItemClick(item) })
-					HomeLayoutMode.PORTRAIT_WITH_BAR -> PortraitWithBarCard(item = item, onClick = { onItemClick(item) })
-					HomeLayoutMode.LARGE_LANDSCAPE -> LargeLandscapeCard(item = item, onClick = { onItemClick(item) })
+					HomeLayoutMode.PORTRAIT_POSTERS -> PortraitPosterCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
+					HomeLayoutMode.WIDE_INFO_CARDS -> WideInfoCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
+					HomeLayoutMode.LANDSCAPE_CARDS -> LandscapeCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
+					HomeLayoutMode.CIRCULAR_DISCS -> CircularDiscCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
+					HomeLayoutMode.PORTRAIT_WITH_BAR -> PortraitWithBarCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
+					HomeLayoutMode.LARGE_LANDSCAPE -> LargeLandscapeCard(item = item, onClick = { onItemClick(item) }, modifier = extraModifier)
 				}
 			}
 		}
@@ -1441,7 +1481,7 @@ private fun LargeLandscapeCard(
 	}
 }
 
-private val view_side_dp = 24.dp
+private val view_side_dp = 88.dp
 private val view_pad_dp = 24.dp
 
 // endregion
