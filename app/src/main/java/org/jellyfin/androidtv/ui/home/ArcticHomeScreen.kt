@@ -156,6 +156,21 @@ fun ArcticHomeScreen() {
 	val sidebarFocus = remember { FocusRequester() }
 	val mainContentFocus = remember { FocusRequester() }
 
+	// One FocusRequester per left-rail entry so any row's leftmost poster (←) can
+	// jump straight to the matching rail item: index 0 = Home, 1 = Search,
+	// 2.. = categories in order, last = Settings.
+	val categoriesList = remember(menuConfig) {
+		menuConfig.categories.filter { it.visible }.sortedBy { it.order }
+	}
+	val sidebarItemFocus = remember(categoriesList.size) {
+		List(categoriesList.size + 3) { FocusRequester() }
+	}
+	val homeSidebarFocus = sidebarItemFocus[0]
+	val categorySidebarFocus = remember(selectedCategory, categoriesList) {
+		val idx = categoriesList.indexOf(selectedCategory)
+		if (idx >= 0) sidebarItemFocus[idx + 2] else sidebarItemFocus[0]
+	}
+
 	// ---- Load and classify every Movie/Series item once ----
 	LaunchedEffect(Unit) {
 		withContext(Dispatchers.IO) {
@@ -309,18 +324,21 @@ fun ArcticHomeScreen() {
 			onHeroInfo = { item -> navigationRepository.navigate(Destinations.itemDetails(item.id)) },
 			onCycleLayoutMode = { layoutMode = HomeLayoutMode.entries[(layoutMode.ordinal + 1) % HomeLayoutMode.entries.size] },
 			initialFocus = mainContentFocus,
-			sidebarFocus = sidebarFocus,
+			homeSidebarFocus = homeSidebarFocus,
+			categorySidebarFocus = categorySidebarFocus,
 		)
 
 		ArcticSidebar(
 			expanded = sidebarExpanded,
 			onExpandedChange = { sidebarExpanded = it },
-			initialFocus = sidebarFocus,
+			itemFocusRequesters = sidebarItemFocus,
 			mainContentFocus = mainContentFocus,
 			config = menuConfig,
 			onHome = {
-				selectedCategory = null
-				homeScope.launch { runCatching { scrollState.scrollTo(0) } }
+				if (selectedCategory != null) {
+					selectedCategory = null
+					homeScope.launch { runCatching { scrollState.scrollTo(0) } }
+				}
 			},
 			onSearch = {
 				sidebarExpanded = false
@@ -331,8 +349,10 @@ fun ArcticHomeScreen() {
 				navigationRepository.navigate(Destinations.fuseSettings)
 			},
 			onCategory = { cat ->
-				selectedCategory = cat
-				Toast.makeText(context, "正在加载 ${cat.label}", Toast.LENGTH_SHORT).show()
+				if (selectedCategory != cat) {
+					selectedCategory = cat
+					Toast.makeText(context, "正在加载 ${cat.label}", Toast.LENGTH_SHORT).show()
+				}
 			},
 		)
 	}
@@ -346,7 +366,7 @@ fun ArcticHomeScreen() {
 private fun ArcticSidebar(
 	expanded: Boolean,
 	onExpandedChange: (Boolean) -> Unit,
-	initialFocus: FocusRequester,
+	itemFocusRequesters: List<FocusRequester>,
 	mainContentFocus: FocusRequester,
 	config: LorlaMenuConfig,
 	onHome: () -> Unit,
@@ -399,7 +419,7 @@ private fun ArcticSidebar(
 			icon = R.drawable.ic_house,
 			label = "首页",
 			expanded = expanded,
-			modifier = Modifier.focusRequester(initialFocus),
+			modifier = Modifier.focusRequester(itemFocusRequesters[0]),
 			onFocusChange = {
 				statesList[0].value = it
 				if (it) onHome()
@@ -413,6 +433,7 @@ private fun ArcticSidebar(
 			icon = R.drawable.ic_search,
 			label = "搜索",
 			expanded = expanded,
+			modifier = Modifier.focusRequester(itemFocusRequesters[1]),
 			onFocusChange = { statesList[1].value = it },
 			onClick = onSearch,
 		)
@@ -421,6 +442,7 @@ private fun ArcticSidebar(
 				icon = cat.programType.iconRes(),
 				label = cat.label,
 				expanded = expanded,
+				modifier = Modifier.focusRequester(itemFocusRequesters[index + 2]),
 				onFocusChange = {
 					statesList[index + 2].value = it
 					if (it) onCategory(cat)
@@ -435,6 +457,7 @@ private fun ArcticSidebar(
 			icon = R.drawable.ic_settings,
 			label = "系统设置",
 			expanded = expanded,
+			modifier = Modifier.focusRequester(itemFocusRequesters[categories.size + 2]),
 			onFocusChange = { statesList[categories.size + 2].value = it },
 			onClick = onSettings,
 		)
@@ -518,7 +541,8 @@ private fun ArcticMainContent(
 	onHeroInfo: (BaseItemDto) -> Unit,
 	onCycleLayoutMode: () -> Unit,
 	initialFocus: FocusRequester,
-	sidebarFocus: FocusRequester,
+	homeSidebarFocus: FocusRequester,
+	categorySidebarFocus: FocusRequester,
 ) {
 	// Snap back to the top whenever the active category changes.
 	LaunchedEffect(selectedCategory) {
@@ -530,6 +554,7 @@ private fun ArcticMainContent(
 	Column(
 		Modifier
 			.fillMaxSize()
+			.padding(start = 64.dp)
 			.then(modifier)
 			.verticalScroll(scrollState),
 	) {
@@ -588,6 +613,9 @@ private fun ArcticMainContent(
 					)
 				}
 			} else {
+				// Leftmost poster of ANY row jumps to the rail item that matches the
+				// current view: Home row -> Home entry, category row -> that category.
+				val rowSidebarFocus = if (selectedCategory == null) homeSidebarFocus else categorySidebarFocus
 				val rows = if (selectedCategory != null) categoryRows else homeRows
 				rows.forEachIndexed { index, row ->
 					ArcticRowView(
@@ -598,7 +626,7 @@ private fun ArcticMainContent(
 						index = index,
 						isFirstRow = index == 0,
 						heroFocus = initialFocus,
-						sidebarFocus = sidebarFocus,
+						sidebarFocus = rowSidebarFocus,
 						firstRowFocus = if (index == 0) firstRowFocus else null,
 					)
 				}
@@ -648,7 +676,7 @@ private fun HeroStage(
 			modifier = Modifier
 				.fillMaxWidth()
 				.padding(
-					start = view_side_dp,
+					start = 24.dp,
 					top = 120.dp,
 					end = view_pad_dp,
 					bottom = 60.dp,
@@ -816,6 +844,16 @@ private fun ArcticInfoPanel(
 						bringIntoViewScope.launch {
 							bringIntoViewRequester.bringIntoView()
 						}
+					}
+				}
+				.onPreviewKeyEvent {
+					// From anywhere on the hero control row (play / info / dots / mode),
+					// pressing DOWN drops into the first content row below.
+					if (it.type == KeyEventType.KeyDown && it.key == Key.DirectionDown) {
+						onDown()
+						true
+					} else {
+						false
 					}
 				},
 		) {
