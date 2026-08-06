@@ -970,7 +970,9 @@ private fun ArcticRowView(
 			// 「更多」海报墙入口放在第 20 个影片之后（不足 20 个则放在末尾）。
 			val morePos = if (items.size > 20) 20 else items.size
 			for (index in items.indices) {
-				item(key = items[index].id) {
+				// key 带上下标：同一部影片可能在一排里重复出现（数据源交叠），
+				// 裸用 id 会 duplicate key 崩溃。
+				item(key = "${items[index].id}_$index") {
 					val extra = Modifier
 						.then(if (isFirstRow && index == 0 && firstRowFocus != null) Modifier.focusRequester(firstRowFocus) else Modifier)
 						.onPreviewKeyEvent { ev ->
@@ -1358,7 +1360,7 @@ private fun ArcticPosterWallScreen(
 						contentPadding = PaddingValues(vertical = 8.dp),
 						modifier = Modifier.fillMaxSize().focusRestorer(),
 					) {
-						gridItemsIndexed(filtered, key = { _, it -> it.id }) { idx, item ->
+						gridItemsIndexed(filtered, key = { i, it -> "${it.id}_$i" }) { idx, item ->
 							PortraitPosterCard(
 								item = item,
 								onClick = { onItemClick(item) },

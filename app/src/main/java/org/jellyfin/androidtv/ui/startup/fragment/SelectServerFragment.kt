@@ -88,9 +88,15 @@ class SelectServerFragment : Fragment() {
 					startupViewModel.discoveredServers.drop(1).collect { discoveryLoading = false }
 				}
 
+				// 已保存的服务器不再重复出现在「发现」区：一是观感重复，
+				// 二是两个分区在同一个 LazyColumn 里，同 id 会触发 duplicate key 崩溃。
+				val discoveredOnly = remember(stored, discovered) {
+					discovered.filter { d -> stored.none { it.id == d.id } }
+				}
+
 				SelectServerScreen(
 					storedServers = stored,
-					discoveredServers = discovered,
+					discoveredServers = discoveredOnly,
 					discoveryLoading = discoveryLoading,
 					notifications = notifications.filter { it.public },
 					onStoredServerClick = { server -> navigateToServer(server.id) },
@@ -221,7 +227,9 @@ private fun SelectServerScreen(
 			// Stored servers
 			if (storedServers.isNotEmpty()) {
 				item { SectionHeader(stringResource(R.string.saved_servers)) }
-				items(storedServers, key = { it.id }) { server ->
+				// key 必须带分区前缀：同一台服务器可能既已保存、又被局域网发现，
+				// 两个分区在同一个 LazyColumn 里，裸用 it.id 会 duplicate key 崩溃。
+				items(storedServers, key = { "stored_${it.id}" }) { server ->
 					ServerCard(
 						server = server,
 						onClick = { onStoredServerClick(server) },
@@ -262,7 +270,7 @@ private fun SelectServerScreen(
 				}
 			}
 			if (discoveredServers.isNotEmpty()) {
-				items(discoveredServers, key = { it.id }) { server ->
+				items(discoveredServers, key = { "found_${it.id}" }) { server ->
 					ServerCard(
 						server = server,
 						onClick = { onDiscoveryServerClick(server) },
