@@ -90,6 +90,7 @@ import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.BaseItemPerson
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.SortOrder
@@ -200,7 +201,6 @@ fun ArcticHomeScreen() {
 							ItemFields.OVERVIEW,
 							ItemFields.DATE_CREATED,
 							ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
-							ItemFields.PEOPLE,
 						),
 						sortBy = setOf(ItemSortBy.DATE_CREATED),
 						sortOrder = setOf(SortOrder.DESCENDING),
@@ -999,11 +999,20 @@ private fun HeroShowcaseCollage(
 ) {
 	val api = koinInject<ApiClient>()
 	// Cast collage: pull up to 9 people (head shots) and tile them over a dimmed
-	// backdrop on the right side — the Arctic Fuse "showcase" look. The people
-	// list from Jellyfin is already ordered by importance (cast first).
-	val actors = remember(item?.id) {
-		item?.people?.orEmpty()?.take(9).orEmpty()
+	// backdrop on the right side — the Arctic Fuse "showcase" look.
+	// The people are fetched ON DEMAND for the current item (NOT via the home
+	// Items request — bundling People into that list made the response huge and
+	// the home screen hung on a black screen).
+	var people by remember(item?.id) { mutableStateOf<List<BaseItemPerson>>(emptyList()) }
+	LaunchedEffect(item?.id) {
+		people = emptyList()
+		if (item?.id != null) {
+			runCatching {
+				api.itemsApi.getPeople(itemId = item.id).content.items.orEmpty()
+			}.getOrElse { emptyList() }.take(9).let { people = it }
+		}
 	}
+	val actors = people
 
 	Box(modifier = modifier) {
 		// Dim the base backdrop a bit harder so the collage pops.
