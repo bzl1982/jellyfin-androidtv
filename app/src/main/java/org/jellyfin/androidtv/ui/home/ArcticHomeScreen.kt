@@ -671,6 +671,11 @@ private fun ArcticMainContent(
 
 			rows.forEachIndexed { index, row ->
 				val mode = rowModes[row.title] ?: row.layoutMode
+				// When the big stage is hidden (NO_STAGE) the mainContentFocus anchor
+				// would be missing and the sidebar's RIGHT key has nothing to land on,
+				// stranding the remote on the rail. Re-use mainContentFocus as the
+				// first-row-first-poster anchor in that case so the chain stays live.
+				val effectiveFirstRowFocus = if (heroLayoutMode == HeroLayoutMode.NO_STAGE) mainContentFocus else firstRowFocus
 				ArcticRowView(
 					title = row.title,
 					items = row.items,
@@ -683,7 +688,7 @@ private fun ArcticMainContent(
 					isFirstRow = index == 0,
 					heroFocus = initialFocus,
 					sidebarFocus = rowSidebarFocus,
-					firstRowFocus = if (index == 0) firstRowFocus else null,
+					firstRowFocus = if (index == 0) effectiveFirstRowFocus else null,
 					scrollState = scrollState,
 					containerY = containerY,
 					sidebarMode = sidebarMode,
