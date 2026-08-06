@@ -390,6 +390,8 @@ fun ArcticHomeScreen() {
 					Toast.makeText(context, "正在加载 ${cat.label}", Toast.LENGTH_SHORT).show()
 				}
 			},
+		)
+
 		}
 
 		// Full-screen poster wall opened from a row's 「更多」. It covers the home
