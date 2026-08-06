@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.preference.HeroLayoutMode
 import org.jellyfin.androidtv.preference.HeroLayoutModePreferences
+import org.jellyfin.androidtv.preference.HomeRowsPreferences
 import org.jellyfin.androidtv.preference.SidebarMode
 import org.jellyfin.androidtv.preference.SidebarModePreferences
 import org.jellyfin.androidtv.ui.base.Text
@@ -23,6 +24,7 @@ import org.jellyfin.androidtv.ui.settings.Routes
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
 import org.jellyfin.androidtv.ui.settings.lorla.FuseRadioOption
 import org.jellyfin.androidtv.ui.settings.lorla.FuseSectionHeader
+import org.jellyfin.androidtv.ui.settings.lorla.FuseSwitchRow
 import org.jellyfin.androidtv.preference.UserSettingPreferences
 import org.koin.compose.koinInject
 
@@ -71,6 +73,16 @@ fun SettingsHomeScreen() {
 					)
 				}
 			}
+		}
+
+		item {
+			// 初次进入首页只生成前几个栏目以加快加载、避免卡顿；开启后加载全部。
+			FuseSwitchRow(
+				title = "加载全部栏目",
+				subtitle = "关闭时首页只显示前 ${5} 个栏目，开启后显示全部",
+				checked = HomeRowsPreferences.getLoadAll(context),
+				onCheckedChange = { HomeRowsPreferences.setLoadAll(context, it) },
+			)
 		}
 
 		item {

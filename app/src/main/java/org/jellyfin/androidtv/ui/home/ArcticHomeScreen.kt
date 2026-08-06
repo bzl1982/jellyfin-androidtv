@@ -1028,7 +1028,7 @@ private fun PortraitPosterCard(
 							}
 						}
 					}
-					true
+					false
 				} else {
 					lpHeld = false
 					if (lpFired) { lpFired = false; true } else false
@@ -1109,7 +1109,7 @@ private fun LandscapeCard(
 							}
 						}
 					}
-					true
+					false
 				} else {
 					lpHeld = false
 					if (lpFired) { lpFired = false; true } else false
