@@ -32,10 +32,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -723,14 +721,13 @@ private fun HeroControlBar(
 			.onPreviewKeyEvent { event ->
 				if (event.type == KeyEventType.KeyDown) {
 					when (event.key) {
-						Key.DirectionDown -> {
-							// The explicit anchor (first-row poster) may not be bound
-							// yet (e.g. a still-composing or empty first row). If that
-							// request fails, fall back to the system's natural down-search
-							// so the remote never gets trapped inside the control bar.
-							if (!onDown()) LocalFocusManager.current.moveFocus(FocusDirection.Down)
-							true
-						}
+					Key.DirectionDown -> {
+						// Try the explicit anchor (first-row poster). If it isn't
+						// reachable yet (still composing / empty first row), DON'T
+						// consume the key — let the system's natural focus search
+						// step down so the remote never traps inside the bar.
+						onDown()
+					}
 						// Pressing UP from any control parks on the (now focusable)
 						// title above the control bar - that is where the remote can
 						// step up to see the full poster via the detail page.
